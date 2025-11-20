@@ -4,10 +4,12 @@ RouteDash is a travel-aware pickup planner that pairs food orders with your curr
 
 ## Features delivered
 - **Full authentication** – register/login customers and restaurants backed by the Express API (JWT cookies).
-- **Route planner** – capture origin/destination via Google Directions, adjust a “ready to eat” slider, and preview a live map.
+- **Route planner** – capture origin/destination via Google Directions, adjust a "ready to eat" slider, and preview a live map.
 - **Registered restaurants only** – recommendations and browse views surface the real restaurants from the backend (no dummy data).
 - **Menu + checkout** – pull live menus, build a cart, and create an order record that drives the order-status screen.
 - **Merchant dashboard** – restaurant users can add sections/items, toggle availability, and see changes reflected instantly for travelers.
+- **Gas/EV Stop Integration** – find and add gas stations or EV charging stations along your route. Select vehicle type (Gas/EV) in your profile, adjust refueling time independently from mealtime, and add stations as waypoints to your route.
+- **Route management** – add restaurants and gas/EV stations as stops, view complete route overview, and export to Google Maps with all waypoints in order.
 
 ## Getting started
 
@@ -36,9 +38,42 @@ RouteDash is a travel-aware pickup planner that pairs food orders with your curr
 - Android: the same key is mapped via `app.config.ts` for the Google Maps SDK (enable **Maps SDK for Android**).
 - Web: when running `npm run web`, the key is used for the Routes REST call.
 
+**Required APIs in Google Cloud Console:**
+- **Routes API** – for directions and route calculation
+- **Places API (Legacy)** – for autocomplete and nearby search (gas/EV stations)
+- **Places API (New)** – optional, for fuel pricing information at gas stations
+
 ### API connection
 - `API_URL` should point to the Express server (defaults to `http://localhost:4000`). For iOS Simulator, `http://127.0.0.1:4000` also works. For Android Emulator, set `API_URL=http://10.0.2.2:4000`.
 - Ensure the server is running before launching the app so auth/menu/order calls succeed.
+
+## Gas/EV Station Features
+
+### Vehicle Type Selection
+- Users can set their vehicle type (Gas or EV) in their profile
+- Vehicle type is saved and persists across sessions
+- If not set, users are prompted to select when planning a route
+
+### Finding Stations
+- Gas stations and EV charging stations are found along your route based on a configurable refueling time
+- Separate slider controls refueling time independently from mealtime
+- Filter to show restaurants only, stations only, or both
+
+### Adding Stops to Route
+- Tap any gas station or restaurant to add it as a waypoint
+- Route automatically recalculates with the new stop
+- All stops appear in the "Route stops" section with type indicators
+- Remove stops individually or clear the entire route
+
+### Route Overview
+- Visual route sequence showing: Start → Stops → Destination
+- Color-coded icons for each stop type
+- Route summary with total duration and distance
+
+### Google Maps Export
+- "Open in Maps" button exports the complete route to Google Maps
+- Includes origin, all waypoints in order, and destination
+- Opens directly in the Google Maps app with turn-by-turn directions
 
 ## Next steps
 - Plug in live user location via `expo-location` to anchor simulation to GPS.

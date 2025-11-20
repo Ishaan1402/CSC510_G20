@@ -14,7 +14,8 @@ Authentication uses an HTTP-only cookie (`routedash_session`) managed through th
 | `POST` | `/api/auth/register-restaurant` | Register a restaurant owner and bootstrap a restaurant profile | Public |
 | `POST` | `/api/auth/login` | Login with email/password and receive a session cookie | Public |
 | `POST` | `/api/auth/logout` | Clear session cookie | Cookie/Bearer |
-| `GET`  | `/api/auth/me` | Get the authenticated user | Cookie/Bearer |
+| `GET`  | `/api/auth/me` | Get the authenticated user (includes vehicleType if set) | Cookie/Bearer |
+| `PATCH` | `/api/auth/profile` | Update user profile (e.g., vehicleType) | Cookie/Bearer |
 
 ### Example: `POST /api/auth/login`
 
@@ -35,6 +36,7 @@ Content-Type: application/json
     "name": "Sanjana Chandrashekar",
     "email": "customer@example.com",
     "role": "CUSTOMER",
+    "vehicleType": "GAS",
     "restaurantId": null
   }
 }
@@ -56,6 +58,33 @@ Content-Type: application/json
 | `PATCH` | `/api/restaurants/:restaurantId/menu/items/:itemId` | Update menu item | Restaurant only |
 | `DELETE` | `/api/restaurants/:restaurantId/menu/items/:itemId` | Delete menu item | Restaurant only |
 | `PATCH` | `/api/restaurants/:restaurantId/orders/:orderId` | Update order status | Restaurant only |
+
+### Example: `PATCH /api/auth/profile`
+
+```http
+PATCH /api/auth/profile HTTP/1.1
+Content-Type: application/json
+Cookie: routedash_session=...
+
+{
+  "vehicleType": "GAS"
+}
+```
+
+```json
+{
+  "user": {
+    "id": "9d9f0b58-...",
+    "name": "Sanjana Chandrashekar",
+    "email": "customer@example.com",
+    "role": "CUSTOMER",
+    "vehicleType": "GAS",
+    "restaurantId": null
+  }
+}
+```
+
+Valid `vehicleType` values: `"GAS"`, `"EV"`, or `null`.
 
 ### Restaurant ownership
 

@@ -25,12 +25,14 @@ export const serializeUser = (user: {
   name: string;
   email: string;
   role: UserRole;
+  vehicleType?: string | null;
   restaurants?: { id: string }[];
 }) => ({
   id: user.id,
   name: user.name,
   email: user.email,
   role: user.role,
+  vehicleType: user.vehicleType ?? null,
   restaurantId: user.restaurants?.[0]?.id,
 });
 
@@ -120,6 +122,21 @@ export const authenticateUser = async (email: string, password: string) => {
   if (!isValid) {
     throw new HttpError(401, "Invalid credentials");
   }
+
+  return user;
+};
+
+export const updateUserProfile = async (userId: string, vehicleType: "GAS" | "EV" | null) => {
+  const user = await prisma.user.update({
+    where: { id: userId },
+    data: { vehicleType },
+    include: {
+      restaurants: {
+        select: { id: true },
+        take: 1,
+      },
+    },
+  });
 
   return user;
 };

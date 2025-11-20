@@ -1,7 +1,11 @@
+export type VehicleType = "GAS" | "EV" | null;
+
 export type TripContext = {
   origin: string;
   destination: string;
   pickupEtaMin: number;
+  vehicleType?: VehicleType;
+  refuelTimeMin?: number;
 };
 
 export type RestaurantSummary = {

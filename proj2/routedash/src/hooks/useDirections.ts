@@ -19,6 +19,11 @@ export type DirectionsResult = {
   leg: RouteLeg;
 };
 
+export type Waypoint = {
+  location: Coordinate;
+  address?: string;
+};
+
 type UseDirectionsState = {
   isLoading: boolean;
   error: string | null;
@@ -68,7 +73,7 @@ export const useDirections = () => {
     result: null,
   });
 
-  const fetchRoute = useCallback(async (origin: string, destination: string) => {
+  const fetchRoute = useCallback(async (origin: string, destination: string, waypoints?: Waypoint[]) => {
     const inputOrigin = origin.trim();
     const inputDestination = destination.trim();
 
@@ -114,6 +119,9 @@ export const useDirections = () => {
         body: JSON.stringify({
           origin: { address: inputOrigin },
           destination: { address: inputDestination },
+          intermediates: waypoints?.map((wp) => ({
+            location: { latLng: { latitude: wp.location.latitude, longitude: wp.location.longitude } },
+          })),
           travelMode: "DRIVE",
           routingPreference: "TRAFFIC_AWARE",
           computeAlternativeRoutes: false,

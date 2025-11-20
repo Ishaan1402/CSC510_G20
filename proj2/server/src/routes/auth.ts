@@ -2,12 +2,14 @@ import { Router, Response } from "express";
 import { z } from "zod";
 
 import { HttpError } from "../errors/HttpError";
+import { prisma } from "../lib/prisma";
 import { requireAuth } from "../middleware/auth";
 import {
   createCustomer,
   createRestaurantOwner,
   authenticateUser,
   serializeUser,
+  updateUserProfile,
 } from "../services/authService";
 import { COOKIE_NAME, cookieOptions, signSession } from "../utils/jwt";
 
@@ -76,9 +78,42 @@ authRouter.post("/logout", (_req, res) => {
   return res.status(204).end();
 });
 
-authRouter.get("/me", requireAuth, (req, res) => {
-  if (!req.user) {
-    throw new HttpError(401, "Authentication required");
+authRouter.get("/me", requireAuth, async (req, res, next) => {
+  try {
+    if (!req.user) {
+      throw new HttpError(401, "Authentication required");
+    }
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      include: {
+        restaurants: {
+          select: { id: true },
+          take: 1,
+        },
+      },
+    });
+    if (!user) {
+      throw new HttpError(404, "User not found");
+    }
+    return res.json({ user: serializeUser(user) });
+  } catch (error) {
+    next(error);
   }
-  return res.json({ user: req.user });
+});
+
+const profileUpdateSchema = z.object({
+  vehicleType: z.enum(["GAS", "EV"]).nullable(),
+});
+
+authRouter.patch("/profile", requireAuth, async (req, res, next) => {
+  try {
+    if (!req.user) {
+      throw new HttpError(401, "Authentication required");
+    }
+    const payload = profileUpdateSchema.parse(req.body);
+    const user = await updateUserProfile(req.user.id, payload.vehicleType);
+    return res.json({ user: serializeUser(user) });
+  } catch (error) {
+    next(error);
+  }
 });

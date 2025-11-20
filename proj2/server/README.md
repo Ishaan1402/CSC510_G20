@@ -60,6 +60,10 @@ After running `npm run db:seed`, you get:
 | Merchant 1 | merchant1@example.com | password123!  |
 | Merchant 2 | merchant2@example.com | password123!  |
 
+## User Profile
+
+Users can store a `vehicleType` preference (`"GAS"`, `"EV"`, or `null`) in their profile. This is used by the mobile app to filter gas stations vs EV charging stations along routes. Update via `PATCH /api/auth/profile`.
+
 ## Core auth endpoints
 
 | Method | Path                        | Notes                                                   |
@@ -68,7 +72,8 @@ After running `npm run db:seed`, you get:
 | POST   | `/api/auth/register-restaurant` | `{ owner + restaurant info }` → returns user + restaurant |
 | POST   | `/api/auth/login`           | `{ email,password }` → sets HttpOnly JWT cookie         |
 | POST   | `/api/auth/logout`          | clears session cookie                                   |
-| GET    | `/api/auth/me`              | returns current user (requires cookie)                  |
+| GET    | `/api/auth/me`              | returns current user (includes vehicleType if set)     |
+| PATCH  | `/api/auth/profile`         | `{ vehicleType }` → update user profile preferences     |
 
 The mobile app calls these endpoints via `fetch` with `credentials:"include"`; the logout button in both customer and merchant views simply invokes `POST /api/auth/logout` and clears local storage.
 

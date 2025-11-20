@@ -16,6 +16,7 @@ export type AuthUser = {
   email: string;
   name: string;
   role: "CUSTOMER" | "RESTAURANT";
+  vehicleType?: "GAS" | "EV" | null;
   restaurantId?: string;
 };
 
