@@ -10,6 +10,7 @@ RouteDash is a travel-aware pickup planner that pairs food orders with your curr
 - **Merchant dashboard** – restaurant users can add sections/items, toggle availability, and see changes reflected instantly for travelers.
 - **Gas/EV Stop Integration** – find and add gas stations or EV charging stations along your route. Select vehicle type (Gas/EV) in your profile, adjust refueling time independently from mealtime, and add stations as waypoints to your route.
 - **Route management** – add restaurants and gas/EV stations as stops, view complete route overview, and export to Google Maps with all waypoints in order.
+- **Traveler Filters** – filter restaurants by fast service, dietary needs, local favorites, and price range.
 
 ## Getting started
 

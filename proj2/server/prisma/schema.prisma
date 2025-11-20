@@ -27,20 +27,23 @@ model User {
 }
 
 model Restaurant {
-  id           String               @id @default(uuid())
-  ownerUser    User                 @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
-  ownerUserId  String
-  name         String
-  address      String
-  latitude     Float?
-  longitude    Float?
-  isActive     Boolean              @default(true)
-  sections     MenuSection[]
-  menuItems    MenuItem[]
-  changeLogs   MenuItemChangeLog[]
-  orders       Order[]              @relation("RestaurantOrders")
-  createdAt    DateTime             @default(now())
-  updatedAt    DateTime             @updatedAt
+  id             String               @id @default(uuid())
+  ownerUser      User                 @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  ownerUserId    String
+  name           String
+  address        String
+  latitude       Float?
+  longitude      Float?
+  isActive       Boolean              @default(true)
+  isFastService  Boolean              @default(false)
+  isLocalFavorite Boolean             @default(false)
+  priceLevel     PriceLevel?           @default(MID)
+  sections       MenuSection[]
+  menuItems      MenuItem[]
+  changeLogs     MenuItemChangeLog[]
+  orders         Order[]              @relation("RestaurantOrders")
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
 
   @@index([ownerUserId])
   @@index([isActive])
@@ -101,6 +104,12 @@ model MenuItemChangeLog {
   @@index([restaurantId])
   @@index([menuItemId])
   @@index([action])
+}
+
+enum PriceLevel {
+  BUDGET
+  MID
+  UPSCALE
 }
 
 enum OrderStatus {

@@ -45,14 +45,58 @@ const orderStatusPayload = z.object({
   status: z.nativeEnum(OrderStatus),
 });
 
+const restaurantFiltersQuery = z.object({
+  fastService: z.preprocess(
+    (val) => (val === "true" ? true : val === "false" ? false : undefined),
+    z.boolean().optional(),
+  ),
+  dietaryNeeds: z.enum(["vegetarian", "vegan"]).optional(),
+  localFavorites: z.preprocess(
+    (val) => (val === "true" ? true : val === "false" ? false : undefined),
+    z.boolean().optional(),
+  ),
+  priceLevel: z.enum(["BUDGET", "MID", "UPSCALE"]).optional(),
+});
+
 export const restaurantRouter = Router();
 
-restaurantRouter.get("/", async (_req, res, next) => {
+restaurantRouter.get("/", async (req, res, next) => {
   try {
-    const restaurants = await getActiveRestaurants();
-    res.json({ restaurants });
+    // Safely parse query parameters with fallback to empty object
+    let filters: {
+      fastService?: boolean;
+      dietaryNeeds?: "vegetarian" | "vegan";
+      localFavorites?: boolean;
+      priceLevel?: "BUDGET" | "MID" | "UPSCALE";
+    } = {};
+
+    try {
+      const parsed = restaurantFiltersQuery.safeParse(req.query);
+      if (parsed.success) {
+        filters = {
+          fastService: parsed.data.fastService ?? undefined,
+          dietaryNeeds: parsed.data.dietaryNeeds,
+          localFavorites: parsed.data.localFavorites ?? undefined,
+          priceLevel: parsed.data.priceLevel,
+        };
+      }
+    } catch (parseError) {
+      // If parsing fails, continue with empty filters (show all restaurants)
+      console.warn("Failed to parse restaurant filters:", parseError);
+    }
+
+    // Get restaurants with error handling
+    const restaurants = await getActiveRestaurants(filters).catch((dbError) => {
+      console.error("Database error fetching restaurants:", dbError);
+      // Return empty array on error instead of throwing
+      return [];
+    });
+
+    res.json({ restaurants: restaurants || [] });
   } catch (error) {
-    next(error);
+    // Final fallback - return empty array on any unexpected error
+    console.error("Unexpected error in restaurants route:", error);
+    res.json({ restaurants: [] });
   }
 });
 

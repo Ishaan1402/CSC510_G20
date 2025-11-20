@@ -273,11 +273,12 @@ export const PlannerScreen = () => {
     const destinationEncoded = encodeURIComponent(destination);
     
     // Build waypoints string - Google Maps expects pipe-separated lat,lng pairs
-    // The order matters - waypoints will be visited in the order they appear
+    // Each coordinate pair should be individually encoded while keeping pipe separators literal
     const waypointsList: string[] = [];
     
     waypoints.forEach((waypoint) => {
-      waypointsList.push(`${waypoint.location.latitude},${waypoint.location.longitude}`);
+      const coordPair = `${waypoint.location.latitude},${waypoint.location.longitude}`;
+      waypointsList.push(encodeURIComponent(coordPair));
     });
 
     let mapsUrl = `https://www.google.com/maps/dir/?api=1`;
@@ -285,8 +286,9 @@ export const PlannerScreen = () => {
     
     if (waypointsList.length > 0) {
       // Waypoints are pipe-separated and will be visited in order
-      const waypointsEncoded = waypointsList.join("|");
-      mapsUrl += `&waypoints=${encodeURIComponent(waypointsEncoded)}`;
+      // Pipe separators remain unencoded, only coordinate pairs are encoded
+      const waypointsString = waypointsList.join("|");
+      mapsUrl += `&waypoints=${waypointsString}`;
     }
     
     mapsUrl += `&destination=${destinationEncoded}`;
@@ -513,21 +515,51 @@ export const PlannerScreen = () => {
   ]);
 
   const handleSelectRestaurant = async (restaurant: RecommendedRestaurant) => {
-    // Add restaurant as waypoint
-    const newWaypoint: Waypoint = {
-      location: restaurant.location,
-      address: restaurant.address,
-    };
+    const isSelected = selectedRestaurants.has(restaurant.id);
+    
+    if (isSelected) {
+      // Remove restaurant from waypoints and selected restaurants
+      const updatedRestaurants = new Map(selectedRestaurants);
+      updatedRestaurants.delete(restaurant.id);
+      setSelectedRestaurants(updatedRestaurants);
 
-    const updatedWaypoints = [...waypoints, newWaypoint];
-    setWaypoints(updatedWaypoints);
-    setSelectedRestaurants(new Map(selectedRestaurants).set(restaurant.id, restaurant));
+      // Find and remove the corresponding waypoint
+      const updatedWaypoints = waypoints.filter((wp) => {
+        return !(
+          Math.abs(wp.location.latitude - restaurant.location.latitude) < 0.0001 &&
+          Math.abs(wp.location.longitude - restaurant.location.longitude) < 0.0001
+        );
+      });
+      setWaypoints(updatedWaypoints);
 
-    // Recalculate route with waypoint
-    if (origin && destination) {
-      const success = await fetchRoute(origin, destination, updatedWaypoints);
-      if (success) {
-        setIsRoutePlotted(true);
+      // Recalculate route without this waypoint
+      if (origin && destination) {
+        const success = await fetchRoute(
+          origin,
+          destination,
+          updatedWaypoints.length > 0 ? updatedWaypoints : undefined,
+        );
+        if (success) {
+          setIsRoutePlotted(true);
+        }
+      }
+    } else {
+      // Add restaurant as waypoint
+      const newWaypoint: Waypoint = {
+        location: restaurant.location,
+        address: restaurant.address,
+      };
+
+      const updatedWaypoints = [...waypoints, newWaypoint];
+      setWaypoints(updatedWaypoints);
+      setSelectedRestaurants(new Map(selectedRestaurants).set(restaurant.id, restaurant));
+
+      // Recalculate route with waypoint
+      if (origin && destination) {
+        const success = await fetchRoute(origin, destination, updatedWaypoints);
+        if (success) {
+          setIsRoutePlotted(true);
+        }
       }
     }
   };

@@ -24,18 +24,70 @@ type ItemInput = {
   tags?: string[];
 };
 
-export const getActiveRestaurants = () =>
-  prisma.restaurant.findMany({
-    where: { isActive: true },
-    select: {
-      id: true,
-      name: true,
-      address: true,
-      latitude: true,
-      longitude: true,
-    },
-    orderBy: { name: "asc" },
-  });
+type RestaurantFilters = {
+  fastService?: boolean;
+  dietaryNeeds?: "vegetarian" | "vegan";
+  localFavorites?: boolean;
+  priceLevel?: "BUDGET" | "MID" | "UPSCALE";
+};
+
+export const getActiveRestaurants = async (filters?: RestaurantFilters) => {
+  try {
+    const whereClause: any = { isActive: true };
+
+    if (filters?.fastService === true) {
+      whereClause.isFastService = true;
+    }
+
+    if (filters?.localFavorites === true) {
+      whereClause.isLocalFavorite = true;
+    }
+
+    if (filters?.priceLevel) {
+      whereClause.priceLevel = filters.priceLevel;
+    }
+
+    let restaurants = await prisma.restaurant.findMany({
+      where: whereClause,
+      select: {
+        id: true,
+        name: true,
+        address: true,
+        latitude: true,
+        longitude: true,
+      },
+      orderBy: { name: "asc" },
+    });
+
+    // Filter by dietary needs if specified
+    if (filters?.dietaryNeeds) {
+      try {
+        const dietaryTag = filters.dietaryNeeds;
+        const restaurantIds = await prisma.menuItem.findMany({
+          where: {
+            restaurant: { isActive: true },
+            tags: { has: dietaryTag },
+            isAvailable: true,
+          },
+          select: { restaurantId: true },
+          distinct: ["restaurantId"],
+        });
+
+        const validRestaurantIds = new Set(restaurantIds.map((item) => item.restaurantId));
+        restaurants = restaurants.filter((restaurant) => validRestaurantIds.has(restaurant.id));
+      } catch (dietaryError) {
+        // If dietary filtering fails, log but continue with existing restaurants
+        console.warn("Error filtering by dietary needs:", dietaryError);
+      }
+    }
+
+    return restaurants;
+  } catch (error) {
+    console.error("Error in getActiveRestaurants:", error);
+    // Return empty array on error instead of throwing
+    return [];
+  }
+};
 
 export const getRestaurantMenu = async (restaurantId: string) => {
   const restaurant = await prisma.restaurant.findUnique({

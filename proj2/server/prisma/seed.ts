@@ -43,12 +43,25 @@ async function main() {
     },
   });
 
+  const merchantThree = await prisma.user.create({
+    data: {
+      name: "Alex Quick Bites",
+      email: "merchant3@example.com",
+      role: UserRole.RESTAURANT,
+      passwordHash: password,
+    },
+  });
+
   const createRestaurant = async (
     ownerId: string,
     name: string,
     address: string,
     latitude: number,
     longitude: number,
+    isFastService: boolean = false,
+    isLocalFavorite: boolean = false,
+    dietaryTags: { vegetarian?: boolean; vegan?: boolean } = {},
+    priceLevel: "BUDGET" | "MID" | "UPSCALE" = "MID",
   ) => {
     const restaurant = await prisma.restaurant.create({
       data: {
@@ -57,6 +70,9 @@ async function main() {
         address,
         latitude,
         longitude,
+        isFastService,
+        isLocalFavorite,
+        priceLevel,
       },
     });
 
@@ -76,6 +92,18 @@ async function main() {
       },
     });
 
+    // Build tags based on dietary requirements
+    const breakfastTags: string[] = [];
+    const lunchTags: string[] = [];
+    if (dietaryTags.vegetarian) {
+      breakfastTags.push("vegetarian");
+      lunchTags.push("vegetarian");
+    }
+    if (dietaryTags.vegan) {
+      breakfastTags.push("vegan");
+      lunchTags.push("vegan");
+    }
+
     await prisma.menuItem.createMany({
       data: [
         {
@@ -84,7 +112,7 @@ async function main() {
           name: "Sunrise Burrito",
           description: "Egg, cheese, potatoes, and salsa wrap.",
           priceCents: 899,
-          tags: ["vegetarian"],
+          tags: breakfastTags.length > 0 ? [...breakfastTags] : ["vegetarian"],
         },
         {
           restaurantId: restaurant.id,
@@ -92,7 +120,7 @@ async function main() {
           name: "Blueberry Pancakes",
           description: "Stack of fluffy pancakes with maple syrup.",
           priceCents: 1099,
-          tags: ["sweet"],
+          tags: breakfastTags.length > 0 ? [...breakfastTags, "sweet"] : ["sweet"],
         },
         {
           restaurantId: restaurant.id,
@@ -100,7 +128,7 @@ async function main() {
           name: "Roasted Veggie Bowl",
           description: "Seasonal vegetables over quinoa and greens.",
           priceCents: 1299,
-          tags: ["vegan", "gluten-free"],
+          tags: lunchTags.length > 0 ? [...lunchTags, "gluten-free"] : ["vegan", "gluten-free"],
         },
         {
           restaurantId: restaurant.id,
@@ -115,14 +143,14 @@ async function main() {
           name: "House Lemonade",
           description: "Fresh squeezed lemons with mint.",
           priceCents: 399,
-          tags: ["drink"],
+          tags: lunchTags.length > 0 ? [...lunchTags, "drink"] : ["drink"],
         },
         {
           restaurantId: restaurant.id,
           name: "Chocolate Chip Cookie",
           description: "Baked in-house every morning.",
           priceCents: 249,
-          tags: ["dessert"],
+          tags: breakfastTags.length > 0 ? [...breakfastTags, "dessert"] : ["dessert"],
         },
       ],
     });
@@ -130,13 +158,17 @@ async function main() {
     return restaurant;
   };
 
-  const [restaurantOne, restaurantTwo] = await Promise.all([
+  const [restaurantOne, restaurantTwo, restaurantThree] = await Promise.all([
     createRestaurant(
       merchantOne.id,
       "RouteDash Fuel Kitchen",
       "123 Main St, Durham NC",
       35.994,
       -78.898,
+      false, // isFastService
+      true,  // isLocalFavorite
+      { vegetarian: true }, // Has vegetarian options
+      "BUDGET", // Price level
     ),
     createRestaurant(
       merchantTwo.id,
@@ -144,6 +176,21 @@ async function main() {
       "500 Hillsborough St, Raleigh NC",
       35.787,
       -78.647,
+      true,  // isFastService
+      false, // isLocalFavorite
+      { vegan: true }, // Has vegan options
+      "MID", // Price level
+    ),
+    createRestaurant(
+      merchantThree.id,
+      "RouteDash Express",
+      "789 Franklin St, Chapel Hill NC",
+      35.913,
+      -79.055,
+      true,  // isFastService
+      true,  // isLocalFavorite
+      { vegetarian: true, vegan: true }, // Has both vegetarian and vegan options
+      "MID", // Price level
     ),
   ]);
 
@@ -234,7 +281,7 @@ async function main() {
 
   console.log("Seed complete:", {
     customer: customer.email,
-    merchants: [merchantOne.email, merchantTwo.email],
+    merchants: [merchantOne.email, merchantTwo.email, merchantThree.email],
   });
 }
 
