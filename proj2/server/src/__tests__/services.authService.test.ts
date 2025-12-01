@@ -7,6 +7,7 @@ import {
   createCustomer,
   createRestaurantOwner,
   serializeUser,
+  updateUserProfile,
 } from "../services/authService";
 const hashPasswordMock = vi.hoisted(() => vi.fn(async (password: string) => `hashed:${password}`));
 const verifyPasswordMock = vi.hoisted(() =>
@@ -17,7 +18,7 @@ type PrismaMock = ReturnType<typeof createPrismaMock>;
 
 function createPrismaMock(): PrismaMock {
   const mock: Record<string, any> = {};
-  mock.user = { create: vi.fn(), findUnique: vi.fn(), findMany: vi.fn() };
+  mock.user = { create: vi.fn(), findUnique: vi.fn(), findMany: vi.fn(), update: vi.fn() };
   mock.restaurant = { create: vi.fn(), findUnique: vi.fn(), findMany: vi.fn() };
   mock.menuSection = {
     create: vi.fn(),
@@ -94,6 +95,7 @@ describe("services/authService.serializeUser", () => {
       name: "Route Dash",
       email: "user@example.com",
       role: UserRole.RESTAURANT,
+      vehicleType: null,
       restaurantId: "rest-1",
     });
   });
@@ -391,5 +393,113 @@ describe("services/authService.authenticateUser", () => {
     });
     const res2 = await authenticateUser("two@example.com", "password123");
     expect(res2.id).toBe("user-2");
+  });
+});
+
+describe("services/authService.updateUserProfile", () => {
+  beforeEach(() => {
+    resetPrismaMock(prisma);
+  });
+
+  it("updates user vehicleType to GAS", async () => {
+    const updatedUser = {
+      id: "user-1",
+      name: "Customer",
+      email: "customer@example.com",
+      role: UserRole.CUSTOMER,
+      vehicleType: "GAS",
+      restaurants: [],
+    };
+    prisma.user.update.mockResolvedValue(updatedUser as any);
+
+    const result = await updateUserProfile("user-1", "GAS");
+
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: "user-1" },
+      data: { vehicleType: "GAS" },
+      include: {
+        restaurants: {
+          select: { id: true },
+          take: 1,
+        },
+      },
+    });
+    expect(result).toBe(updatedUser);
+    expect(result.vehicleType).toBe("GAS");
+  });
+
+  it("updates user vehicleType to EV", async () => {
+    const updatedUser = {
+      id: "user-1",
+      name: "Customer",
+      email: "customer@example.com",
+      role: UserRole.CUSTOMER,
+      vehicleType: "EV",
+      restaurants: [],
+    };
+    prisma.user.update.mockResolvedValue(updatedUser as any);
+
+    const result = await updateUserProfile("user-1", "EV");
+
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: "user-1" },
+      data: { vehicleType: "EV" },
+      include: {
+        restaurants: {
+          select: { id: true },
+          take: 1,
+        },
+      },
+    });
+    expect(result.vehicleType).toBe("EV");
+  });
+
+  it("updates user vehicleType to null", async () => {
+    const updatedUser = {
+      id: "user-1",
+      name: "Customer",
+      email: "customer@example.com",
+      role: UserRole.CUSTOMER,
+      vehicleType: null,
+      restaurants: [],
+    };
+    prisma.user.update.mockResolvedValue(updatedUser as any);
+
+    const result = await updateUserProfile("user-1", null);
+
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: "user-1" },
+      data: { vehicleType: null },
+      include: {
+        restaurants: {
+          select: { id: true },
+          take: 1,
+        },
+      },
+    });
+    expect(result.vehicleType).toBeNull();
+  });
+
+  it("includes restaurants in response", async () => {
+    const updatedUser = {
+      id: "user-1",
+      name: "Owner",
+      email: "owner@example.com",
+      role: UserRole.RESTAURANT,
+      vehicleType: "GAS",
+      restaurants: [{ id: "rest-1" }],
+    };
+    prisma.user.update.mockResolvedValue(updatedUser as any);
+
+    const result = await updateUserProfile("user-1", "GAS");
+
+    expect(result.restaurants).toEqual([{ id: "rest-1" }]);
+  });
+
+  it("handles database errors", async () => {
+    const error = new Error("Database error");
+    prisma.user.update.mockRejectedValue(error);
+
+    await expect(updateUserProfile("user-1", "GAS")).rejects.toBe(error);
   });
 });
