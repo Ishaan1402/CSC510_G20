@@ -192,3 +192,65 @@ export const getOrderForCustomer = async (orderId: string, customerId: string) =
 
   return attachFinancials(order);
 };
+
+type UpdateRouteInput = {
+  routeOrigin?: string;
+  routeDestination?: string;
+  pickupEtaMin?: number;
+};
+
+// Orders can only be re-routed if they are in PENDING or PREPARING status
+const ROUTE_UPDATEABLE_STATUSES = [OrderStatus.PENDING, OrderStatus.PREPARING];
+
+export const updateOrderRoute = async (
+  orderId: string,
+  customerId: string,
+  input: UpdateRouteInput,
+) => {
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    include: customerOrderInclude,
+  });
+
+  if (!order || order.customerId !== customerId) {
+    throw new HttpError(404, "Order not found");
+  }
+
+  if (!ROUTE_UPDATEABLE_STATUSES.includes(order.status)) {
+    throw new HttpError(
+      400,
+      `Cannot update route for order with status ${order.status}. Only orders with status PENDING or PREPARING can be re-routed.`,
+    );
+  }
+
+  const updateData: Partial<{
+    routeOrigin: string;
+    routeDestination: string;
+    pickupEtaMin: number;
+  }> = {};
+
+  if (input.routeOrigin !== undefined) {
+    updateData.routeOrigin = input.routeOrigin;
+  }
+  if (input.routeDestination !== undefined) {
+    updateData.routeDestination = input.routeDestination;
+  }
+  if (input.pickupEtaMin !== undefined) {
+    if (input.pickupEtaMin <= 0) {
+      throw new HttpError(400, "pickupEtaMin must be a positive number");
+    }
+    updateData.pickupEtaMin = input.pickupEtaMin;
+  }
+
+  if (Object.keys(updateData).length === 0) {
+    throw new HttpError(400, "At least one route field must be provided");
+  }
+
+  const updated = await prisma.order.update({
+    where: { id: orderId },
+    data: updateData,
+    include: customerOrderInclude,
+  });
+
+  return attachFinancials(updated);
+};

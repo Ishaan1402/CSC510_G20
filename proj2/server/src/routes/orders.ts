@@ -2,7 +2,12 @@ import { Router } from "express";
 import { z } from "zod";
 
 import { requireAuth, requireRole } from "../middleware/auth";
-import { createOrder, getOrderForCustomer, listOrdersForUser } from "../services/orderService";
+import {
+  createOrder,
+  getOrderForCustomer,
+  listOrdersForUser,
+  updateOrderRoute,
+} from "../services/orderService";
 
 const orderPayload = z.object({
   restaurantId: z.string().uuid(),
@@ -47,6 +52,23 @@ ordersRouter.get("/:orderId", requireAuth, requireRole("CUSTOMER"), async (req, 
   try {
     const { orderId } = orderIdParam.parse(req.params);
     const order = await getOrderForCustomer(orderId, req.user!.id);
+    res.json({ order });
+  } catch (error) {
+    next(error);
+  }
+});
+
+const routeUpdatePayload = z.object({
+  routeOrigin: z.string().min(1).optional(),
+  routeDestination: z.string().min(1).optional(),
+  pickupEtaMin: z.number().int().positive().optional(),
+});
+
+ordersRouter.patch("/:orderId/route", requireAuth, requireRole("CUSTOMER"), async (req, res, next) => {
+  try {
+    const { orderId } = orderIdParam.parse(req.params);
+    const payload = routeUpdatePayload.parse(req.body);
+    const order = await updateOrderRoute(orderId, req.user!.id, payload);
     res.json({ order });
   } catch (error) {
     next(error);

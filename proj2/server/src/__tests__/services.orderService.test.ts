@@ -8,6 +8,7 @@ import {
   listOrdersForRestaurant,
   listOrdersForUser,
   updateOrderStatusForRestaurant,
+  updateOrderRoute,
 } from "../services/orderService";
 
 type PrismaMock = ReturnType<typeof createPrismaMock>;
@@ -417,5 +418,183 @@ describe("services/orderService", () => {
         routeDestination: "B",
       }),
     ).rejects.toBeInstanceOf(HttpError);
+  });
+
+  describe("updateOrderRoute", () => {
+    const baseOrder = {
+      id: "order-1",
+      customerId: "user-1",
+      restaurantId: "rest-1",
+      status: OrderStatus.PENDING,
+      pickupEtaMin: 15,
+      routeOrigin: "Campus",
+      routeDestination: "Downtown",
+      totalCents: 2000,
+      items: [{ priceCents: 1000, quantity: 2 }],
+      restaurant: { id: "rest-1", name: "Test Restaurant", address: "123 Main St" },
+    };
+
+    it("updates route origin for pending order", async () => {
+      prisma.order.findUnique.mockResolvedValue(baseOrder as any);
+      prisma.order.update.mockResolvedValue({
+        ...baseOrder,
+        routeOrigin: "New Origin",
+      } as any);
+
+      const result = await updateOrderRoute("order-1", "user-1", {
+        routeOrigin: "New Origin",
+      });
+
+      expect(result).toMatchObject({
+        routeOrigin: "New Origin",
+        routeDestination: "Downtown",
+        pickupEtaMin: 15,
+      });
+      expect(prisma.order.update).toHaveBeenCalledWith({
+        where: { id: "order-1" },
+        data: { routeOrigin: "New Origin" },
+        include: expect.any(Object),
+      });
+    });
+
+    it("updates route destination for pending order", async () => {
+      prisma.order.findUnique.mockResolvedValue(baseOrder as any);
+      prisma.order.update.mockResolvedValue({
+        ...baseOrder,
+        routeDestination: "New Destination",
+      } as any);
+
+      const result = await updateOrderRoute("order-1", "user-1", {
+        routeDestination: "New Destination",
+      });
+
+      expect(result).toMatchObject({
+        routeOrigin: "Campus",
+        routeDestination: "New Destination",
+      });
+    });
+
+    it("updates pickupEtaMin for pending order", async () => {
+      prisma.order.findUnique.mockResolvedValue(baseOrder as any);
+      prisma.order.update.mockResolvedValue({
+        ...baseOrder,
+        pickupEtaMin: 20,
+      } as any);
+
+      const result = await updateOrderRoute("order-1", "user-1", {
+        pickupEtaMin: 20,
+      });
+
+      expect(result).toMatchObject({
+        pickupEtaMin: 20,
+      });
+    });
+
+    it("updates all route fields at once", async () => {
+      prisma.order.findUnique.mockResolvedValue(baseOrder as any);
+      prisma.order.update.mockResolvedValue({
+        ...baseOrder,
+        routeOrigin: "Origin A",
+        routeDestination: "Destination B",
+        pickupEtaMin: 25,
+      } as any);
+
+      const result = await updateOrderRoute("order-1", "user-1", {
+        routeOrigin: "Origin A",
+        routeDestination: "Destination B",
+        pickupEtaMin: 25,
+      });
+
+      expect(result).toMatchObject({
+        routeOrigin: "Origin A",
+        routeDestination: "Destination B",
+        pickupEtaMin: 25,
+      });
+    });
+
+    it("allows route update for PREPARING status", async () => {
+      const preparingOrder = { ...baseOrder, status: OrderStatus.PREPARING };
+      prisma.order.findUnique.mockResolvedValue(preparingOrder as any);
+      prisma.order.update.mockResolvedValue({
+        ...preparingOrder,
+        routeOrigin: "Updated Origin",
+      } as any);
+
+      const result = await updateOrderRoute("order-1", "user-1", {
+        routeOrigin: "Updated Origin",
+      });
+
+      expect(result).toMatchObject({
+        routeOrigin: "Updated Origin",
+      });
+    });
+
+    it("throws 404 when order not found", async () => {
+      prisma.order.findUnique.mockResolvedValue(null);
+      await expect(
+        updateOrderRoute("order-1", "user-1", { routeOrigin: "New Origin" }),
+      ).rejects.toMatchObject({ status: 404 });
+    });
+
+    it("throws 404 when order belongs to different customer", async () => {
+      prisma.order.findUnique.mockResolvedValue({
+        ...baseOrder,
+        customerId: "user-2",
+      } as any);
+      await expect(
+        updateOrderRoute("order-1", "user-1", { routeOrigin: "New Origin" }),
+      ).rejects.toMatchObject({ status: 404 });
+    });
+
+    it("throws 400 when order status is READY", async () => {
+      const readyOrder = { ...baseOrder, status: OrderStatus.READY };
+      prisma.order.findUnique.mockResolvedValue(readyOrder as any);
+      await expect(
+        updateOrderRoute("order-1", "user-1", { routeOrigin: "New Origin" }),
+      ).rejects.toMatchObject({
+        status: 400,
+        message: expect.stringContaining("READY"),
+      });
+    });
+
+    it("throws 400 when order status is COMPLETED", async () => {
+      const completedOrder = { ...baseOrder, status: OrderStatus.COMPLETED };
+      prisma.order.findUnique.mockResolvedValue(completedOrder as any);
+      await expect(
+        updateOrderRoute("order-1", "user-1", { routeOrigin: "New Origin" }),
+      ).rejects.toMatchObject({
+        status: 400,
+        message: expect.stringContaining("COMPLETED"),
+      });
+    });
+
+    it("throws 400 when order status is CANCELED", async () => {
+      const canceledOrder = { ...baseOrder, status: OrderStatus.CANCELED };
+      prisma.order.findUnique.mockResolvedValue(canceledOrder as any);
+      await expect(
+        updateOrderRoute("order-1", "user-1", { routeOrigin: "New Origin" }),
+      ).rejects.toMatchObject({
+        status: 400,
+        message: expect.stringContaining("CANCELED"),
+      });
+    });
+
+    it("throws 400 when pickupEtaMin is not positive", async () => {
+      prisma.order.findUnique.mockResolvedValue(baseOrder as any);
+      await expect(
+        updateOrderRoute("order-1", "user-1", { pickupEtaMin: 0 }),
+      ).rejects.toMatchObject({ status: 400 });
+      await expect(
+        updateOrderRoute("order-1", "user-1", { pickupEtaMin: -5 }),
+      ).rejects.toMatchObject({ status: 400 });
+    });
+
+    it("throws 400 when no route fields are provided", async () => {
+      prisma.order.findUnique.mockResolvedValue(baseOrder as any);
+      await expect(updateOrderRoute("order-1", "user-1", {})).rejects.toMatchObject({
+        status: 400,
+        message: expect.stringContaining("At least one route field"),
+      });
+    });
   });
 });
