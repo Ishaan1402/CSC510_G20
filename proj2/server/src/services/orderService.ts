@@ -200,7 +200,7 @@ type UpdateRouteInput = {
 };
 
 // Orders can only be re-routed if they are in PENDING or PREPARING status
-const ROUTE_UPDATEABLE_STATUSES = [OrderStatus.PENDING, OrderStatus.PREPARING];
+const ROUTE_UPDATEABLE_STATUSES: OrderStatus[] = [OrderStatus.PENDING, OrderStatus.PREPARING];
 
 export const updateOrderRoute = async (
   orderId: string,
@@ -216,7 +216,7 @@ export const updateOrderRoute = async (
     throw new HttpError(404, "Order not found");
   }
 
-  if (!ROUTE_UPDATEABLE_STATUSES.includes(order.status)) {
+  if (!ROUTE_UPDATEABLE_STATUSES.includes(order.status as OrderStatus)) {
     throw new HttpError(
       400,
       `Cannot update route for order with status ${order.status}. Only orders with status PENDING or PREPARING can be re-routed.`,
