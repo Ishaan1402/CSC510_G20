@@ -55,11 +55,39 @@ export type RootStackParamList = {
 
   // Orders & status
   OrderStatus: {
-    orderId?: string;
+    order: OrderSummary & {
+      items: Array<OrderSummary["items"][number] & { name?: string; menuItem?: { name?: string | null } }>;
+      createdAt?: string;
+    };
   };
 
   Orders: undefined;
 };
+
+export type OrderSummary = {
+  id: string;
+  status: OrderStatusValue;
+  totalCents: number;
+  pickupEtaMin: number;
+  routeOrigin: string;
+  routeDestination: string;
+  restaurant: {
+    id: string;
+    name: string;
+    address: string;
+  };
+  items: Array<{
+    id: string;
+    menuItemId: string;
+    quantity: number;
+    priceCents: number;
+    name?: string;
+    menuItem?: { name?: string | null };
+  }>;
+  createdAt?: string;
+};
+
+export type OrderStatusValue = "PENDING" | "PREPARING" | "READY" | "COMPLETED" | "CANCELED";
 
 export type CustomerTabParamList = {
   Trip: undefined;           // Tab showing TripStackNavigator
