@@ -5,6 +5,13 @@ const API_URL =
   (Constants?.manifest?.extra as { apiUrl?: string } | undefined)?.apiUrl ??
   "http://localhost:4000";
 
+// Module-level token storage for Bearer auth (mobile-compatible)
+let authToken: string | null = null;
+
+export const setAuthToken = (token: string | null) => {
+  authToken = token;
+};
+
 type RequestOptions = RequestInit & {
   requireAuth?: boolean;
 };
@@ -12,13 +19,21 @@ type RequestOptions = RequestInit & {
 export const apiFetch = async <T>(path: string, options: RequestOptions = {}): Promise<T> => {
   const { headers, requireAuth = true, credentials, ...rest } = options;
 
+  // Build headers with Bearer token if available
+  const requestHeaders: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(headers as Record<string, string> | undefined),
+  };
+
+  // Add Bearer token for authenticated requests on mobile
+  if (requireAuth && authToken) {
+    requestHeaders["Authorization"] = `Bearer ${authToken}`;
+  }
+
   const response = await fetch(`${API_URL}${path}`, {
     method: rest.method ?? "GET",
     credentials: credentials ?? (requireAuth ? "include" : "omit"),
-    headers: {
-      "Content-Type": "application/json",
-      ...headers,
-    },
+    headers: requestHeaders,
     ...rest,
   });
 

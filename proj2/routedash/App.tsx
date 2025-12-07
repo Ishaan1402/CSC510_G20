@@ -158,7 +158,7 @@ const MerchantNavigator = () => (
         headerTitle: route.params.restaurant.name,
         animation: "slide_from_right",
       })}
-    />
+    />  
   </Stack.Navigator>
 );
 

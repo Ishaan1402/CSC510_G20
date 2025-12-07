@@ -34,7 +34,8 @@ export const createApp = () => {
     res.status(404).json({ error: "Not found" });
   });
 
-  app.use((err: Error, _req: express.Request, res: express.Response) => {
+  // Error handler - MUST have 4 parameters for Express to recognize it
+  app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     if (err instanceof HttpError) {
       return res.status(err.status).json({ error: err.message });
     }

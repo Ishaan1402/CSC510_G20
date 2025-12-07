@@ -52,6 +52,52 @@ async function main() {
     },
   });
 
+  // Additional merchants for I-95 route demo
+  const merchantFour = await prisma.user.create({
+    data: {
+      name: "Richmond Roadside Diner",
+      email: "merchant4@example.com",
+      role: UserRole.RESTAURANT,
+      passwordHash: password,
+    },
+  });
+
+  const merchantFive = await prisma.user.create({
+    data: {
+      name: "DC Express Eats",
+      email: "merchant5@example.com",
+      role: UserRole.RESTAURANT,
+      passwordHash: password,
+    },
+  });
+
+  const merchantSix = await prisma.user.create({
+    data: {
+      name: "Baltimore Harbor Grill",
+      email: "merchant6@example.com",
+      role: UserRole.RESTAURANT,
+      passwordHash: password,
+    },
+  });
+
+  const merchantSeven = await prisma.user.create({
+    data: {
+      name: "Philly Quick Stop",
+      email: "merchant7@example.com",
+      role: UserRole.RESTAURANT,
+      passwordHash: password,
+    },
+  });
+
+  const merchantEight = await prisma.user.create({
+    data: {
+      name: "NYC Metro Bistro",
+      email: "merchant8@example.com",
+      role: UserRole.RESTAURANT,
+      passwordHash: password,
+    },
+  });
+
   const createRestaurant = async (
     ownerId: string,
     name: string,
@@ -158,7 +204,8 @@ async function main() {
     return restaurant;
   };
 
-  const [restaurantOne, restaurantTwo, restaurantThree] = await Promise.all([
+  const [restaurantOne, restaurantTwo, restaurantThree, restaurantFour, restaurantFive, restaurantSix, restaurantSeven, restaurantEight] = await Promise.all([
+    // Original local restaurants
     createRestaurant(
       merchantOne.id,
       "RouteDash Fuel Kitchen",
@@ -191,6 +238,67 @@ async function main() {
       true,  // isLocalFavorite
       { vegetarian: true, vegan: true }, // Has both vegetarian and vegan options
       "MID", // Price level
+    ),
+    // I-95 Route restaurants (Raleigh to New York)
+    // Richmond, VA area (I-95)
+    createRestaurant(
+      merchantFour.id,
+      "Richmond Roadside Diner",
+      "2500 W Broad St, Richmond VA 23220",
+      37.548,
+      -77.476,
+      true,  // isFastService
+      true,  // isLocalFavorite
+      { vegetarian: true }, // Has vegetarian options
+      "BUDGET", // Price level
+    ),
+    // Washington DC area (I-95)
+    createRestaurant(
+      merchantFive.id,
+      "DC Express Eats",
+      "1200 Maryland Ave SW, Washington DC 20024",
+      38.886,
+      -77.019,
+      true,  // isFastService
+      false, // isLocalFavorite
+      { vegan: true }, // Has vegan options
+      "MID", // Price level
+    ),
+    // Baltimore, MD area (I-95)
+    createRestaurant(
+      merchantSix.id,
+      "Baltimore Harbor Grill",
+      "200 E Pratt St, Baltimore MD 21202",
+      39.286,
+      -76.612,
+      false, // isFastService
+      true,  // isLocalFavorite
+      { vegetarian: true, vegan: true }, // Has both
+      "UPSCALE", // Price level
+    ),
+    // Philadelphia, PA area (I-95)
+    createRestaurant(
+      merchantSeven.id,
+      "Philly Quick Stop",
+      "1500 Market St, Philadelphia PA 19102",
+      39.953,
+      -75.165,
+      true,  // isFastService
+      false, // isLocalFavorite
+      { vegetarian: true }, // Has vegetarian options
+      "BUDGET", // Price level
+    ),
+    // New York, NY area (I-95)
+    createRestaurant(
+      merchantEight.id,
+      "NYC Metro Bistro",
+      "350 5th Ave, New York NY 10118",
+      40.748,
+      -73.985,
+      false, // isFastService
+      true,  // isLocalFavorite
+      { vegetarian: true, vegan: true }, // Has both
+      "UPSCALE", // Price level
     ),
   ]);
 
@@ -281,7 +389,18 @@ async function main() {
 
   console.log("Seed complete:", {
     customer: customer.email,
-    merchants: [merchantOne.email, merchantTwo.email, merchantThree.email],
+    merchants: [
+      merchantOne.email,
+      merchantTwo.email,
+      merchantThree.email,
+      merchantFour.email,
+      merchantFive.email,
+      merchantSix.email,
+      merchantSeven.email,
+      merchantEight.email,
+    ],
+    restaurants: 8,
+    route: "Raleigh, NC to New York, NY (I-95)",
   });
 }
 

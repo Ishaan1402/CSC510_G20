@@ -36,7 +36,8 @@ const loginSchema = z.object({
 const sendSession = (res: Response, user: ReturnType<typeof serializeUser>) => {
   const token = signSession({ userId: user.id, role: user.role });
   res.cookie(COOKIE_NAME, token, cookieOptions);
-  return res.json({ user });
+  // Return token in body for mobile clients that can't use cookies
+  return res.json({ user, token });
 };
 
 authRouter.post("/register-customer", async (req, res, next) => {
