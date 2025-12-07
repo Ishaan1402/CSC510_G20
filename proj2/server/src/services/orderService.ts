@@ -192,3 +192,159 @@ export const getOrderForCustomer = async (orderId: string, customerId: string) =
 
   return attachFinancials(order);
 };
+
+export type PopularItem = {
+  menuItemId: string;
+  name: string;
+  totalQuantity: number;
+  totalRevenueCents: number;
+};
+
+export type TimeBasedStats = {
+  date: string; // YYYY-MM-DD format
+  orderCount: number;
+  totalRevenueCents: number;
+  averageOrderValueCents: number;
+};
+
+export type RestaurantAnalytics = {
+  popularItems: PopularItem[];
+  averageOrderCostCents: number;
+  totalOrders: number;
+  totalRevenueCents: number;
+  ordersByDay: TimeBasedStats[];
+  ordersByWeek: TimeBasedStats[];
+  peakOrderingHours: Array<{ hour: number; orderCount: number }>;
+};
+
+export const getRestaurantAnalytics = async (restaurantId: string): Promise<RestaurantAnalytics> => {
+  // Get all orders for this restaurant (excluding canceled orders)
+  const orders = await prisma.order.findMany({
+    where: {
+      restaurantId,
+      status: { not: "CANCELED" },
+    },
+    include: {
+      items: {
+        include: {
+          menuItem: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
+      },
+    },
+  });
+
+  // Calculate total orders, revenue, and average cost
+  const totalOrders = orders.length;
+  const totalRevenueCents = orders.reduce((sum, order) => sum + order.totalCents, 0);
+  const averageOrderCostCents = totalOrders > 0 ? Math.round(totalRevenueCents / totalOrders) : 0;
+
+  // Time-based analytics: Orders by day
+  const ordersByDayMap = new Map<string, { count: number; revenue: number }>();
+  orders.forEach((order) => {
+    const date = new Date(order.createdAt).toISOString().split("T")[0]; // YYYY-MM-DD
+    const existing = ordersByDayMap.get(date);
+    if (existing) {
+      existing.count += 1;
+      existing.revenue += order.totalCents;
+    } else {
+      ordersByDayMap.set(date, { count: 1, revenue: order.totalCents });
+    }
+  });
+
+  const ordersByDay: TimeBasedStats[] = Array.from(ordersByDayMap.entries())
+    .map(([date, data]) => ({
+      date,
+      orderCount: data.count,
+      totalRevenueCents: data.revenue,
+      averageOrderValueCents: Math.round(data.revenue / data.count),
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(-30); // Last 30 days
+
+  // Orders by week
+  const ordersByWeekMap = new Map<string, { count: number; revenue: number }>();
+  orders.forEach((order) => {
+    const date = new Date(order.createdAt);
+    const weekStart = new Date(date);
+    weekStart.setDate(date.getDate() - date.getDay()); // Start of week (Sunday)
+    const weekKey = weekStart.toISOString().split("T")[0];
+    const existing = ordersByWeekMap.get(weekKey);
+    if (existing) {
+      existing.count += 1;
+      existing.revenue += order.totalCents;
+    } else {
+      ordersByWeekMap.set(weekKey, { count: 1, revenue: order.totalCents });
+    }
+  });
+
+  const ordersByWeek: TimeBasedStats[] = Array.from(ordersByWeekMap.entries())
+    .map(([date, data]) => ({
+      date,
+      orderCount: data.count,
+      totalRevenueCents: data.revenue,
+      averageOrderValueCents: Math.round(data.revenue / data.count),
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(-12); // Last 12 weeks
+
+  // Peak ordering hours
+  const hourCounts = new Map<number, number>();
+  orders.forEach((order) => {
+    const hour = new Date(order.createdAt).getHours();
+    hourCounts.set(hour, (hourCounts.get(hour) || 0) + 1);
+  });
+
+  const peakOrderingHours = Array.from(hourCounts.entries())
+    .map(([hour, orderCount]) => ({ hour, orderCount }))
+    .sort((a, b) => b.orderCount - a.orderCount)
+    .slice(0, 5); // Top 5 hours
+
+  // Aggregate popular items by menuItemId
+  const itemMap = new Map<string, { name: string; totalQuantity: number; totalRevenueCents: number }>();
+
+  orders.forEach((order) => {
+    order.items.forEach((orderItem) => {
+      const menuItemId = orderItem.menuItemId;
+      const menuItemName = orderItem.menuItem?.name ?? "Unknown Item";
+      const quantity = orderItem.quantity;
+      const revenueCents = orderItem.priceCents * quantity;
+
+      const existing = itemMap.get(menuItemId);
+      if (existing) {
+        existing.totalQuantity += quantity;
+        existing.totalRevenueCents += revenueCents;
+      } else {
+        itemMap.set(menuItemId, {
+          name: menuItemName,
+          totalQuantity: quantity,
+          totalRevenueCents: revenueCents,
+        });
+      }
+    });
+  });
+
+  // Convert to array and sort by total quantity (most popular first)
+  const popularItems: PopularItem[] = Array.from(itemMap.entries())
+    .map(([menuItemId, data]) => ({
+      menuItemId,
+      name: data.name,
+      totalQuantity: data.totalQuantity,
+      totalRevenueCents: data.totalRevenueCents,
+    }))
+    .sort((a, b) => b.totalQuantity - a.totalQuantity);
+
+  return {
+    popularItems,
+    averageOrderCostCents,
+    totalOrders,
+    totalRevenueCents,
+    ordersByDay,
+    ordersByWeek,
+    peakOrderingHours,
+  };
+};

@@ -4,7 +4,11 @@ import { z } from "zod";
 
 import { requireAuth, requireRole } from "../middleware/auth";
 import { ensureRestaurantOwnership } from "../middleware/ownership";
-import { listOrdersForRestaurant, updateOrderStatusForRestaurant } from "../services/orderService";
+import {
+  listOrdersForRestaurant,
+  updateOrderStatusForRestaurant,
+  getRestaurantAnalytics,
+} from "../services/orderService";
 import {
   getActiveRestaurants,
   getRestaurantMenu,
@@ -120,6 +124,22 @@ restaurantRouter.get(
       const { restaurantId } = restaurantIdParam.parse(req.params);
       const orders = await listOrdersForRestaurant(restaurantId);
       res.json({ orders });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+restaurantRouter.get(
+  "/:restaurantId/analytics",
+  requireAuth,
+  requireRole("RESTAURANT"),
+  ensureRestaurantOwnership,
+  async (req, res, next) => {
+    try {
+      const { restaurantId } = restaurantIdParam.parse(req.params);
+      const analytics = await getRestaurantAnalytics(restaurantId);
+      res.json(analytics);
     } catch (error) {
       next(error);
     }

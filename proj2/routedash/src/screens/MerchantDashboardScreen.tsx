@@ -66,15 +66,42 @@ const ORDER_ACTIONS: Partial<
   ],
 };
 
+type PopularItem = {
+  menuItemId: string;
+  name: string;
+  totalQuantity: number;
+  totalRevenueCents: number;
+};
+
+type TimeBasedStats = {
+  date: string;
+  orderCount: number;
+  totalRevenueCents: number;
+  averageOrderValueCents: number;
+};
+
+type RestaurantAnalytics = {
+  popularItems: PopularItem[];
+  averageOrderCostCents: number;
+  totalOrders: number;
+  totalRevenueCents: number;
+  ordersByDay: TimeBasedStats[];
+  ordersByWeek: TimeBasedStats[];
+  peakOrderingHours: Array<{ hour: number; orderCount: number }>;
+};
+
 export const MerchantDashboardScreen = () => {
   const { user, logout } = useAuth();
-  const [activeTab, setActiveTab] = useState<"orders" | "menu">("orders");
+  const [activeTab, setActiveTab] = useState<"orders" | "menu" | "analytics">("orders");
   const [sections, setSections] = useState<MenuSection[]>([]);
   const [orders, setOrders] = useState<RestaurantOrder[]>([]);
+  const [analytics, setAnalytics] = useState<RestaurantAnalytics | null>(null);
   const [isMenuLoading, setIsMenuLoading] = useState(true);
   const [isOrdersLoading, setIsOrdersLoading] = useState(true);
+  const [isAnalyticsLoading, setIsAnalyticsLoading] = useState(false);
   const [menuError, setMenuError] = useState<string | null>(null);
   const [ordersError, setOrdersError] = useState<string | null>(null);
+  const [analyticsError, setAnalyticsError] = useState<string | null>(null);
   const [sectionTitle, setSectionTitle] = useState("");
   const [itemName, setItemName] = useState("");
   const [itemPrice, setItemPrice] = useState("10.00");
@@ -118,6 +145,24 @@ export const MerchantDashboardScreen = () => {
       setOrdersError((err as Error).message);
     } finally {
       setIsOrdersLoading(false);
+    }
+  }, [restaurantId]);
+
+  const loadAnalytics = useCallback(async () => {
+    if (!restaurantId) {
+      return;
+    }
+    try {
+      setAnalyticsError(null);
+      setIsAnalyticsLoading(true);
+      const response = await apiFetch<RestaurantAnalytics>(
+        `/api/restaurants/${restaurantId}/analytics`,
+      );
+      setAnalytics(response);
+    } catch (err) {
+      setAnalyticsError((err as Error).message);
+    } finally {
+      setIsAnalyticsLoading(false);
     }
   }, [restaurantId]);
 
@@ -206,12 +251,14 @@ export const MerchantDashboardScreen = () => {
     }
   };
 
-  const switchTab = (tab: "orders" | "menu") => {
+  const switchTab = (tab: "orders" | "menu" | "analytics") => {
     setActiveTab(tab);
     if (tab === "orders") {
       loadOrders().catch(() => {});
-    } else {
+    } else if (tab === "menu") {
       loadMenu().catch(() => {});
+    } else if (tab === "analytics") {
+      loadAnalytics().catch(() => {});
     }
   };
 
@@ -248,6 +295,19 @@ export const MerchantDashboardScreen = () => {
         >
           <Text style={[styles.tabButtonText, activeTab === "menu" && styles.tabButtonTextActive]}>
             Menu
+          </Text>
+        </Pressable>
+        <Pressable
+          onPress={() => switchTab("analytics")}
+          style={[styles.tabButton, activeTab === "analytics" && styles.tabButtonActive]}
+        >
+          <Text
+            style={[
+              styles.tabButtonText,
+              activeTab === "analytics" && styles.tabButtonTextActive,
+            ]}
+          >
+            Analytics
           </Text>
         </Pressable>
       </View>
@@ -316,6 +376,116 @@ export const MerchantDashboardScreen = () => {
               </View>
             );
           })}
+        </>
+      ) : activeTab === "analytics" ? (
+        <>
+          {analyticsError ? <Text style={styles.error}>{analyticsError}</Text> : null}
+          {isAnalyticsLoading ? <ActivityIndicator color="#2563EB" /> : null}
+          {!isAnalyticsLoading && analytics && (
+            <>
+              <View style={styles.card}>
+                <Text style={styles.sectionTitle}>Order Statistics</Text>
+                <View style={styles.statRow}>
+                  <View style={styles.statBox}>
+                    <Text style={styles.statValue}>{analytics.totalOrders}</Text>
+                    <Text style={styles.statLabel}>Total Orders</Text>
+                  </View>
+                  <View style={styles.statBox}>
+                    <Text style={styles.statValue}>
+                      ${(analytics.totalRevenueCents / 100).toFixed(2)}
+                    </Text>
+                    <Text style={styles.statLabel}>Total Revenue</Text>
+                  </View>
+                </View>
+                <View style={styles.statRow}>
+                  <View style={styles.statBox}>
+                    <Text style={styles.statValue}>
+                      ${(analytics.averageOrderCostCents / 100).toFixed(2)}
+                    </Text>
+                    <Text style={styles.statLabel}>Avg Order Value</Text>
+                  </View>
+                </View>
+              </View>
+
+              {analytics.ordersByDay.length > 0 && (
+                <View style={styles.card}>
+                  <Text style={styles.sectionTitle}>Orders by Day (Last 30 Days)</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    <View style={styles.timeStatsContainer}>
+                      {analytics.ordersByDay.slice(-7).map((day) => (
+                        <View key={day.date} style={styles.timeStatBox}>
+                          <Text style={styles.timeStatDate}>
+                            {new Date(day.date).toLocaleDateString("en-US", {
+                              month: "short",
+                              day: "numeric",
+                            })}
+                          </Text>
+                          <Text style={styles.timeStatValue}>{day.orderCount}</Text>
+                          <Text style={styles.timeStatLabel}>orders</Text>
+                          <Text style={styles.timeStatRevenue}>
+                            ${(day.totalRevenueCents / 100).toFixed(0)}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  </ScrollView>
+                </View>
+              )}
+
+              {analytics.peakOrderingHours.length > 0 && (
+                <View style={styles.card}>
+                  <Text style={styles.sectionTitle}>Peak Ordering Hours</Text>
+                  {analytics.peakOrderingHours.map((hourData, index) => (
+                    <View key={hourData.hour} style={styles.hourRow}>
+                      <View style={styles.hourInfo}>
+                        <Text style={styles.hourText}>
+                          {hourData.hour === 0
+                            ? "12 AM"
+                            : hourData.hour < 12
+                              ? `${hourData.hour} AM`
+                              : hourData.hour === 12
+                                ? "12 PM"
+                                : `${hourData.hour - 12} PM`}
+                        </Text>
+                        <Text style={styles.meta}>{hourData.orderCount} orders</Text>
+                      </View>
+                      <View style={styles.hourBar}>
+                        <View
+                          style={[
+                            styles.hourBarFill,
+                            {
+                              width: `${(hourData.orderCount / analytics.peakOrderingHours[0].orderCount) * 100}%`,
+                            },
+                          ]}
+                        />
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              <View style={styles.card}>
+                <Text style={styles.sectionTitle}>Most Popular Items</Text>
+                {analytics.popularItems.length === 0 ? (
+                  <Text style={styles.meta}>No orders yet</Text>
+                ) : (
+                  analytics.popularItems.map((item, index) => (
+                    <View key={item.menuItemId} style={styles.popularItemRow}>
+                      <View style={styles.popularItemRank}>
+                        <Text style={styles.rankNumber}>{index + 1}</Text>
+                      </View>
+                      <View style={styles.popularItemInfo}>
+                        <Text style={styles.popularItemName}>{item.name}</Text>
+                        <Text style={styles.meta}>
+                          {item.totalQuantity} ordered • ${(item.totalRevenueCents / 100).toFixed(2)} revenue
+                        </Text>
+                      </View>
+                    </View>
+                  ))
+                )}
+              </View>
+            </>
+          )}
         </>
       ) : (
         <>
@@ -555,4 +725,118 @@ const styles = StyleSheet.create({
     backgroundColor: "#FEE2E2",
   },
   deleteText: { color: "#B91C1C", fontWeight: "600" },
+  statRow: {
+    flexDirection: "row",
+    gap: 12,
+    marginTop: 8,
+  },
+  statBox: {
+    flex: 1,
+    backgroundColor: "#F1F5F9",
+    borderRadius: 12,
+    padding: 16,
+    alignItems: "center",
+  },
+  statValue: {
+    fontSize: 24,
+    fontWeight: "700",
+    color: "#0F172A",
+    marginBottom: 4,
+  },
+  statLabel: {
+    fontSize: 12,
+    color: "#64748B",
+    fontWeight: "600",
+  },
+  popularItemRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#E2E8F0",
+  },
+  popularItemRank: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#2563EB",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
+  },
+  rankNumber: {
+    color: "#FFF",
+    fontWeight: "700",
+    fontSize: 14,
+  },
+  popularItemInfo: {
+    flex: 1,
+  },
+  popularItemName: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#0F172A",
+    marginBottom: 4,
+  },
+  timeStatsContainer: {
+    flexDirection: "row",
+    gap: 12,
+    paddingVertical: 8,
+  },
+  timeStatBox: {
+    minWidth: 80,
+    backgroundColor: "#F1F5F9",
+    borderRadius: 12,
+    padding: 12,
+    alignItems: "center",
+  },
+  timeStatDate: {
+    fontSize: 11,
+    color: "#64748B",
+    fontWeight: "600",
+    marginBottom: 4,
+  },
+  timeStatValue: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: "#0F172A",
+  },
+  timeStatLabel: {
+    fontSize: 10,
+    color: "#64748B",
+    marginTop: 2,
+  },
+  timeStatRevenue: {
+    fontSize: 12,
+    color: "#2563EB",
+    fontWeight: "600",
+    marginTop: 4,
+  },
+  hourRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 12,
+    gap: 12,
+  },
+  hourInfo: {
+    width: 80,
+  },
+  hourText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#0F172A",
+    marginBottom: 2,
+  },
+  hourBar: {
+    flex: 1,
+    height: 8,
+    backgroundColor: "#E2E8F0",
+    borderRadius: 4,
+    overflow: "hidden",
+  },
+  hourBarFill: {
+    height: "100%",
+    backgroundColor: "#2563EB",
+    borderRadius: 4,
+  },
 });

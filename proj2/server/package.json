@@ -15,6 +15,7 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
+    "db:demo": "tsx prisma/addDemoAnalytics.ts",
     "typecheck": "tsc --noEmit",
     "format:check": "prettier --check \"src/**/*.{ts,tsx}\" \"prisma/**/*.ts\" \"*.{js,ts,json}\" \"../routedash/src/**/*.{ts,tsx}\" \"../routedash/App.tsx\""
   },
