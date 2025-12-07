@@ -35,12 +35,8 @@ import {
   TripContext,
   type VehicleType,
 } from "../navigation/types";
-import type {
-  SavedTrip,
-  SavedTripWaypoint,
-  SavedTripRouteSnapshot,
-} from "../types/savedTrip";
-import { saveNewTrip,  } from "../utils/savedTripsStorage";
+import type { SavedTrip, SavedTripWaypoint, SavedTripRouteSnapshot  } from "../types/savedTrip";
+import { saveNewTrip } from "../utils/savedTripsStorage";
 
 const DEFAULT_REGION = {
   latitude: 37.7749,
@@ -50,13 +46,21 @@ const DEFAULT_REGION = {
 };
 
 const formatDistance = (meters: number) => {
-  if (!meters) return "—";
-  if (meters < 1000) return `${meters.toFixed(0)} m`;
+  if (!meters) {
+    return "—";
+  }
+
+  if (meters < 1000) {
+    return `${meters.toFixed(0)} m`;
+  }
+
   return `${(meters / 1000).toFixed(1)} km`;
 };
 
 const computeRegionFromCoordinates = (points: LatLng[]) => {
-  if (!points.length) return DEFAULT_REGION;
+  if (!points.length) {
+    return DEFAULT_REGION;
+  }
 
   let minLat = points[0].latitude;
   let maxLat = points[0].latitude;
@@ -78,6 +82,9 @@ const computeRegionFromCoordinates = (points: LatLng[]) => {
   return { latitude, longitude, latitudeDelta, longitudeDelta };
 };
 
+// Helper to make a stable key for a coordinate (for kind lookup)
+const coordKey = (lat: number, lng: number) => `${lat.toFixed(6)},${lng.toFixed(6)}`;
+
 export const PlannerScreen = () => {
   const { user } = useAuth();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -97,7 +104,6 @@ export const PlannerScreen = () => {
   const gasStationDetails = useGasStationDetails();
   const originAutocomplete = usePlacesAutocomplete();
   const destinationAutocomplete = usePlacesAutocomplete();
-
   const {
     error: recommendationsError,
     fetchRestaurants,
@@ -106,7 +112,6 @@ export const PlannerScreen = () => {
     targetTravelMinutes,
     reset: resetRecommendations,
   } = useRestaurantRecommendations();
-
   const {
     error: gasStationsError,
     fetchGasStations,
@@ -115,7 +120,6 @@ export const PlannerScreen = () => {
     targetTravelMinutes: gasTargetTravelMinutes,
     reset: resetGasStations,
   } = useGasStations();
-
   const {
     error: evStationsError,
     fetchEVStations,
@@ -124,7 +128,6 @@ export const PlannerScreen = () => {
     targetTravelMinutes: evTargetTravelMinutes,
     reset: resetEVStations,
   } = useEVStations();
-
   const { updateVehicleType } = useUserProfile();
 
   const [origin, setOrigin] = useState<string>("");
@@ -132,9 +135,7 @@ export const PlannerScreen = () => {
   const [isRoutePlotted, setIsRoutePlotted] = useState(false);
   const [mealWindow, setMealWindow] = useState<number>(35);
   const [refuelTimeMin, setRefuelTimeMin] = useState<number>(0);
-  const [stopTypeFilter, setStopTypeFilter] = useState<"restaurants" | "stations" | "both">(
-    "both",
-  );
+  const [stopTypeFilter, setStopTypeFilter] = useState<"restaurants" | "stations" | "both">("both");
   const [vehicleType, setVehicleType] = useState<VehicleType>(
     (user?.vehicleType as VehicleType) ?? null,
   );
@@ -144,6 +145,10 @@ export const PlannerScreen = () => {
   const [selectedRestaurants, setSelectedRestaurants] = useState<
     Map<string, RecommendedRestaurant>
   >(new Map());
+  // For trips loaded from storage: coord → kind
+  const [savedWaypointKinds, setSavedWaypointKinds] = useState<
+    Record<string, SavedTripWaypoint["kind"]>
+  >({});
 
   const window = useWindowDimensions();
   const mapRef = useRef<MapView | null>(null);
@@ -153,7 +158,6 @@ export const PlannerScreen = () => {
   const coordinates = useMemo(() => result?.coordinates ?? [], [result?.coordinates]);
   const startPoint: LatLng | undefined = coordinates[0];
   const endPoint: LatLng | undefined = coordinates[coordinates.length - 1];
-
   const totalMinutes = useMemo(
     () =>
       result?.leg.durationSeconds ? Math.max(Math.round(result.leg.durationSeconds / 60), 1) : null,
@@ -207,28 +211,32 @@ export const PlannerScreen = () => {
 
   useEffect(
     () => () => {
-      if (originDebounceRef.current) clearTimeout(originDebounceRef.current);
-      if (destinationDebounceRef.current) clearTimeout(destinationDebounceRef.current);
+      if (originDebounceRef.current) {
+        clearTimeout(originDebounceRef.current);
+      }
+      if (destinationDebounceRef.current) {
+        clearTimeout(destinationDebounceRef.current);
+      }
     },
     [],
   );
 
   const handlePreviewRoute = async () => {
-    const success = await fetchRoute(
-      origin,
-      destination,
-      waypoints.length > 0 ? waypoints : undefined,
-    );
-    if (success) setIsRoutePlotted(true);
+    const success = await fetchRoute(origin, destination, waypoints.length > 0 ? waypoints : undefined);
+    if (success) {
+      setIsRoutePlotted(true);
+    }
   };
 
   const handleSelectGasStation = async (station: GasStation) => {
     setSelectedGasStation(station);
 
+    // Fetch pricing details
     if (station.id) {
       await gasStationDetails.fetchDetails(station.id);
     }
 
+    // Add as waypoint
     const newWaypoint: Waypoint = {
       location: station.location,
       address: station.address,
@@ -237,43 +245,60 @@ export const PlannerScreen = () => {
     const updatedWaypoints = [...waypoints, newWaypoint];
     setWaypoints(updatedWaypoints);
 
+    // Recalculate route with waypoint
     if (origin && destination) {
       const success = await fetchRoute(origin, destination, updatedWaypoints);
-      if (success) setIsRoutePlotted(true);
+      if (success) {
+        setIsRoutePlotted(true);
+      }
     }
   };
 
   const handleRemoveWaypoint = async (index: number) => {
     const removedWaypoint = waypoints[index];
+    if (!removedWaypoint) return;
+
     const updatedWaypoints = waypoints.filter((_, i) => i !== index);
     setWaypoints(updatedWaypoints);
 
-    if (removedWaypoint) {
-      const updatedRestaurants = new Map(selectedRestaurants);
-      for (const [id, restaurant] of updatedRestaurants.entries()) {
-        if (
-          Math.abs(restaurant.location.latitude - removedWaypoint.location.latitude) < 0.0001 &&
-          Math.abs(restaurant.location.longitude - removedWaypoint.location.longitude) < 0.0001
-        ) {
-          updatedRestaurants.delete(id);
-          break;
-        }
-      }
-      setSelectedRestaurants(updatedRestaurants);
-    }
+    // Clean up saved kind for that coordinate
+    const key = coordKey(removedWaypoint.location.latitude, removedWaypoint.location.longitude);
+    setSavedWaypointKinds((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
 
+    // Remove from selected restaurants if it was a restaurant (live session)
+    const updatedRestaurants = new Map(selectedRestaurants);
+    for (const [id, restaurant] of updatedRestaurants.entries()) {
+      if (
+        Math.abs(restaurant.location.latitude - removedWaypoint.location.latitude) < 0.0001 &&
+        Math.abs(restaurant.location.longitude - removedWaypoint.location.longitude) < 0.0001
+      ) {
+        updatedRestaurants.delete(id);
+        break;
+      }
+    }
+    setSelectedRestaurants(updatedRestaurants);
+
+    // Recalculate route without this waypoint
     if (origin && destination) {
       const success = await fetchRoute(
         origin,
         destination,
         updatedWaypoints.length > 0 ? updatedWaypoints : undefined,
       );
-      if (success) setIsRoutePlotted(true);
+      if (success) {
+        setIsRoutePlotted(true);
+      }
     }
   };
 
   const handleExportToGoogleMaps = () => {
-    if (!origin || !destination) return;
+    if (!origin || !destination) {
+      return;
+    }
 
     const originEncoded = encodeURIComponent(origin);
     const destinationEncoded = encodeURIComponent(destination);
@@ -286,10 +311,12 @@ export const PlannerScreen = () => {
 
     let mapsUrl = `https://www.google.com/maps/dir/?api=1`;
     mapsUrl += `&origin=${originEncoded}`;
+
     if (waypointsList.length > 0) {
       const waypointsString = waypointsList.join("|");
       mapsUrl += `&waypoints=${waypointsString}`;
     }
+
     mapsUrl += `&destination=${destinationEncoded}`;
 
     Linking.openURL(mapsUrl).catch((err: Error) => {
@@ -299,7 +326,9 @@ export const PlannerScreen = () => {
 
   const handleOriginChange = (value: string) => {
     setOrigin(value);
-    if (originDebounceRef.current) clearTimeout(originDebounceRef.current);
+    if (originDebounceRef.current) {
+      clearTimeout(originDebounceRef.current);
+    }
     if (!value.trim()) {
       originAutocomplete.clearSuggestions();
       return;
@@ -311,7 +340,9 @@ export const PlannerScreen = () => {
 
   const handleDestinationChange = (value: string) => {
     setDestination(value);
-    if (destinationDebounceRef.current) clearTimeout(destinationDebounceRef.current);
+    if (destinationDebounceRef.current) {
+      clearTimeout(destinationDebounceRef.current);
+    }
     if (!value.trim()) {
       destinationAutocomplete.clearSuggestions();
       return;
@@ -339,7 +370,6 @@ export const PlannerScreen = () => {
     }
   };
 
-  // load vehicle preference
   useEffect(() => {
     if (user) {
       if (user.vehicleType) {
@@ -351,70 +381,87 @@ export const PlannerScreen = () => {
     }
   }, [user, showVehicleSelector]);
 
-  // load from saved trip
+  // Load from a saved trip if coming from SavedTrips
   useEffect(() => {
-  if (params.fromSavedTrip && params.savedTrip) {
-    const t = params.savedTrip as SavedTrip;
+    const loadFromSavedTrip = async () => {
+      if (!params.fromSavedTrip || !params.savedTrip) return;
 
-    // Basic fields
-    setOrigin(t.origin);
-    setDestination(t.destination);
-    setMealWindow(t.stopWindowMinutes);
+      const t = params.savedTrip;
 
-    // stopType → filters
-    if (t.stopType === "food") {
-      setStopTypeFilter("restaurants");
-    } else if (t.stopType === "gas" || t.stopType === "ev") {
-      setStopTypeFilter("stations");
-    } else {
-      setStopTypeFilter("both");
+      // Basic fields
+      setOrigin(t.origin);
+      setDestination(t.destination);
+      setMealWindow(t.stopWindowMinutes);
+
+      // stopType → filters
+      if (t.stopType === "food") {
+        setStopTypeFilter("restaurants");
+      } else if (t.stopType === "gas" || t.stopType === "ev") {
+        setStopTypeFilter("stations");
+      } else {
+        setStopTypeFilter("both");
+      }
+
+      if (t.stopType === "gas") {
+        setVehicleType("GAS");
+      } else if (t.stopType === "ev") {
+        setVehicleType("EV");
+      }
+
+      // Build local waypoints from saved trip
+      const loadedWaypoints: Waypoint[] =
+        t.waypoints?.map((wp) => ({
+          location: {
+            latitude: wp.latitude,
+            longitude: wp.longitude,
+          },
+          address: wp.address ?? undefined,
+        })) ?? [];
+
+      setWaypoints(loadedWaypoints);
+
+      // Build map of coord → kind
+      const kindMap: Record<string, SavedTripWaypoint["kind"]> = {};
+      (t.waypoints ?? []).forEach((wp) => {
+        kindMap[coordKey(wp.latitude, wp.longitude)] = wp.kind;
+      });
+      setSavedWaypointKinds(kindMap);
+
+      // Clear transient state
+      setSelectedGasStation(null);
+      setSelectedRestaurants(new Map());
+      reset();
+      resetRecommendations();
+      resetGasStations();
+      resetEVStations();
+
+      // Recalculate route with these waypoints
+      const success = await fetchRoute(
+        t.origin,
+        t.destination,
+        loadedWaypoints.length > 0 ? loadedWaypoints : undefined,
+      );
+      if (success) {
+        setIsRoutePlotted(true);
+      }
+    };
+
+    void loadFromSavedTrip();
+  }, [
+    params.fromSavedTrip,
+    params.savedTrip,
+    reset,
+    resetRecommendations,
+    resetGasStations,
+    resetEVStations,
+    fetchRoute,
+  ]);
+
+  useEffect(() => {
+    if (totalMinutes && refuelTimeMin === 0) {
+      setRefuelTimeMin(Math.max(1, Math.round(totalMinutes * 0.5)));
     }
-
-    if (t.stopType === "gas") {
-      setVehicleType("GAS");
-    } else if (t.stopType === "ev") {
-      setVehicleType("EV");
-    }
-
-    // clear current route/search state
-    setIsRoutePlotted(false);
-    setSelectedGasStation(null);
-    setSelectedRestaurants(new Map());
-    reset();
-    resetRecommendations();
-    resetGasStations();
-    resetEVStations();
-
-    // Restore waypoints (if any)
-    let restoredWaypoints: Waypoint[] = [];
-    if (t.waypoints && t.waypoints.length) {
-      restoredWaypoints = t.waypoints.map((wp) => ({
-        location: {
-          latitude: wp.latitude,
-          longitude: wp.longitude,
-        },
-        address: wp.address ?? undefined,
-      }));
-      setWaypoints(restoredWaypoints);
-    } else {
-      setWaypoints([]);
-    }
-
-    // Recalculate route using saved origin/destination/waypoints
-    if (t.origin && t.destination) {
-      (async () => {
-        const success = await fetchRoute(
-          t.origin,
-          t.destination,
-          restoredWaypoints.length ? restoredWaypoints : undefined,
-        );
-        if (success) {
-          setIsRoutePlotted(true);
-        }
-      })();
-    }
-  }
-}, [params, reset, resetRecommendations, resetGasStations, resetEVStations, fetchRoute]);
+  }, [totalMinutes, refuelTimeMin]);
 
   useEffect(() => {
     if (result?.coordinates?.length && result.leg.durationSeconds) {
@@ -425,7 +472,6 @@ export const PlannerScreen = () => {
       } else {
         resetRecommendations();
       }
-
       if (
         (stopTypeFilter === "stations" || stopTypeFilter === "both") &&
         vehicleType &&
@@ -435,13 +481,17 @@ export const PlannerScreen = () => {
         const refuelSliderValue =
           refuelTimeMin || Math.max(1, Math.round((totalMinutes ?? 60) * 0.5));
         if (vehicleType === "GAS") {
-          fetchGasStations(result.coordinates, result.leg.durationSeconds, refuelSliderValue).catch(
-            () => {},
-          );
+          fetchGasStations(
+            result.coordinates,
+            result.leg.durationSeconds,
+            refuelSliderValue,
+          ).catch(() => {});
         } else if (vehicleType === "EV") {
-          fetchEVStations(result.coordinates, result.leg.durationSeconds, refuelSliderValue).catch(
-            () => {},
-          );
+          fetchEVStations(
+            result.coordinates,
+            result.leg.durationSeconds,
+            refuelSliderValue,
+          ).catch(() => {});
         }
       } else {
         resetGasStations();
@@ -469,7 +519,9 @@ export const PlannerScreen = () => {
   ]);
 
   useEffect(() => {
-    if (!result?.coordinates?.length) setIsRoutePlotted(false);
+    if (!result?.coordinates?.length) {
+      setIsRoutePlotted(false);
+    }
   }, [result?.coordinates?.length]);
 
   const handleClearPlanner = () => {
@@ -481,6 +533,7 @@ export const PlannerScreen = () => {
     setWaypoints([]);
     setSelectedGasStation(null);
     setSelectedRestaurants(new Map());
+    setSavedWaypointKinds({});
     reset();
     resetRecommendations();
     resetGasStations();
@@ -499,25 +552,32 @@ export const PlannerScreen = () => {
     try {
       await updateVehicleType(newVehicleType);
     } catch {
-      // handled in hook
+      // Error already handled in hook
     }
   };
 
   useEffect(() => {
     if (totalMinutes) {
       const clamped = Math.min(Math.max(mealWindow, sliderMin), sliderMax);
-      if (clamped !== mealWindow) setMealWindow(clamped);
+      if (clamped !== mealWindow) {
+        setMealWindow(clamped);
+      }
     }
   }, [mealWindow, sliderMax, sliderMin, totalMinutes]);
 
   const statusLabel: string = useMemo(() => {
-    if (isDirectionsLoading) return "Mapping your drive…";
+    if (isDirectionsLoading) {
+      return "Mapping your drive…";
+    }
     if (isRecommendationsLoading || isGasStationsLoading || isEVStationsLoading) {
-      if (stopTypeFilter === "restaurants") return "Searching for restaurants…";
-      if (stopTypeFilter === "stations") return "Searching for stations…";
+      if (stopTypeFilter === "restaurants") {
+        return "Searching for restaurants…";
+      }
+      if (stopTypeFilter === "stations") {
+        return "Searching for stations…";
+      }
       return "Searching for stops along your route…";
     }
-
     if (restaurantRecommendations.length || gasStations.length || evStations.length) {
       const parts: string[] = [];
       if (
@@ -552,13 +612,13 @@ export const PlannerScreen = () => {
         return `Found ${parts.join(" and ")} along your route.`;
       }
     }
-
     if (recommendationsError || gasStationsError || evStationsError) {
       return "We couldn't load stop ideas just now. Try again in a moment.";
     }
     if (isRoutePlotted) {
-      if (!vehicleType)
+      if (!vehicleType) {
         return "Select your vehicle type to see gas/EV stations along your route.";
+      }
       return "Route ready — adjust the sliders to refresh recommendations.";
     }
     return "Plot a trip to discover great pickup stops along the way.";
@@ -602,7 +662,9 @@ export const PlannerScreen = () => {
           destination,
           updatedWaypoints.length > 0 ? updatedWaypoints : undefined,
         );
-        if (success) setIsRoutePlotted(true);
+        if (success) {
+          setIsRoutePlotted(true);
+        }
       }
     } else {
       const newWaypoint: Waypoint = {
@@ -616,13 +678,17 @@ export const PlannerScreen = () => {
 
       if (origin && destination) {
         const success = await fetchRoute(origin, destination, updatedWaypoints);
-        if (success) setIsRoutePlotted(true);
+        if (success) {
+          setIsRoutePlotted(true);
+        }
       }
     }
   };
 
   const handleOpenRestaurantMenu = (restaurant: RecommendedRestaurant) => {
-    if (!origin || !destination) return;
+    if (!origin || !destination) {
+      return;
+    }
 
     const summary: RestaurantSummary = {
       id: restaurant.id,
@@ -641,7 +707,6 @@ export const PlannerScreen = () => {
     return;
   }
 
-  // Map your stopTypeFilter + vehicleType into SavedTrip.stopType
   let stopType: SavedTrip["stopType"] = "mixed";
   if (stopTypeFilter === "restaurants") {
     stopType = "food";
@@ -650,43 +715,44 @@ export const PlannerScreen = () => {
     else if (vehicleType === "EV") stopType = "ev";
   }
 
-  // Pick one selected restaurant if any (first value from the Map)
   const firstSelectedRestaurant = selectedRestaurants.values().next().value as
     | RecommendedRestaurant
     | undefined;
 
-  // --- build routeSnapshot + waypointSnapshots ---
+  // 👇 NEW: build waypointSnapshots + routeSnapshot consistently
   let routeSnapshot: SavedTripRouteSnapshot | undefined;
   let waypointSnapshots: SavedTripWaypoint[] | undefined;
 
   if (result?.leg && coordinates.length) {
-    waypointSnapshots = waypoints.map((wp) => {
-      let kind: SavedTripWaypoint["kind"] = "unknown";
+    waypointSnapshots =
+      waypoints.length > 0
+        ? waypoints.map((wp) => {
+            let kind: SavedTripWaypoint["kind"] = "unknown";
 
-      // Is this waypoint one of the selected restaurants?
-      for (const restaurant of selectedRestaurants.values()) {
-        if (
-          Math.abs(restaurant.location.latitude - wp.location.latitude) < 0.0001 &&
-          Math.abs(restaurant.location.longitude - wp.location.longitude) < 0.0001
-        ) {
-          kind = "restaurant";
-          break;
-        }
-      }
+            for (const restaurant of selectedRestaurants.values()) {
+              if (
+                Math.abs(restaurant.location.latitude - wp.location.latitude) < 0.0001 &&
+                Math.abs(restaurant.location.longitude - wp.location.longitude) < 0.0001
+              ) {
+                kind = "restaurant";
+                break;
+              }
+            }
 
-      if (kind === "unknown" && vehicleType === "GAS") {
-        kind = "gas";
-      } else if (kind === "unknown" && vehicleType === "EV") {
-        kind = "ev";
-      }
+            if (kind === "unknown" && vehicleType === "GAS") {
+              kind = "gas";
+            } else if (kind === "unknown" && vehicleType === "EV") {
+              kind = "ev";
+            }
 
-      return {
-        latitude: wp.location.latitude,
-        longitude: wp.location.longitude,
-        address: wp.address,
-        kind,
-      };
-    });
+            return {
+              latitude: wp.location.latitude,
+              longitude: wp.location.longitude,
+              address: wp.address ?? undefined,
+              kind,
+            };
+          })
+        : undefined;
 
     routeSnapshot = {
       durationText: result.leg.durationText ?? "",
@@ -698,40 +764,13 @@ export const PlannerScreen = () => {
     };
   }
 
-  // --- restaurant snapshot with numeric priceLevel ---
-  const restaurantSnapshot = firstSelectedRestaurant
-    ? (() => {
-        const raw = firstSelectedRestaurant.priceLevel;
-        let priceLevel: number | null | undefined = null;
-
-        if (typeof raw === "number") {
-          priceLevel = raw;
-        } else if (typeof raw === "string") {
-          const parsed = Number(raw);
-          priceLevel = Number.isFinite(parsed) ? parsed : null;
-        } else {
-          priceLevel = null;
-        }
-
-        return {
-          id: firstSelectedRestaurant.id.toString(),
-          name: firstSelectedRestaurant.name,
-          address: firstSelectedRestaurant.address,
-          rating: firstSelectedRestaurant.rating,
-          priceLevel,
-        };
-      })()
-    : undefined;
-
   const trip: SavedTrip = {
     id: Date.now().toString(),
     createdAt: new Date().toISOString(),
-
     origin,
     destination,
     stopType,
     stopWindowMinutes: sliderValue,
-
     filters: {
       fastService: false,
       vegetarian: false,
@@ -739,12 +778,32 @@ export const PlannerScreen = () => {
       localFavorites: false,
       priceLevel: null,
     },
+    restaurant: firstSelectedRestaurant
+      ? (() => {
+          const raw = firstSelectedRestaurant.priceLevel;
+          let priceLevel: number | null | undefined = null;
 
-    restaurant: restaurantSnapshot,
+          if (typeof raw === "number") {
+            priceLevel = raw;
+          } else if (typeof raw === "string") {
+            const parsed = Number(raw);
+            priceLevel = Number.isFinite(parsed) ? parsed : null;
+          } else {
+            priceLevel = null;
+          }
+
+          return {
+            id: firstSelectedRestaurant.id.toString(),
+            name: firstSelectedRestaurant.name,
+            address: firstSelectedRestaurant.address,
+            rating: firstSelectedRestaurant.rating,
+            priceLevel,
+          };
+        })()
+      : undefined,
     orderSummary: undefined,
-
-    routeSnapshot,
-    waypoints: waypointSnapshots,
+    routeSnapshot,            // ✅ now has coordinates
+    waypoints: waypointSnapshots, // ✅ separate from snapshot
   };
 
   try {
@@ -755,7 +814,9 @@ export const PlannerScreen = () => {
     alert("We couldn't save this trip just now. Please try again.");
   }
 };
-  const canPreview = Boolean(origin.trim()) && Boolean(destination.trim()) && !isDirectionsLoading;
+
+  const canPreview =
+    Boolean(origin.trim()) && Boolean(destination.trim()) && !isDirectionsLoading;
   const canClear = Boolean(origin.trim() || destination.trim() || coordinates.length);
   const canAdjustMealWindow = Boolean(totalMinutes && sliderMax > sliderMin);
 
@@ -807,7 +868,7 @@ export const PlannerScreen = () => {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        {/* Route details card */}
+        {/* FORM CARD */}
         <View style={[styles.formCard, isCompactWidth && styles.cardCompact]}>
           <Text style={styles.sectionTitle}>Route details</Text>
 
@@ -838,7 +899,9 @@ export const PlannerScreen = () => {
                   >
                     <Text style={styles.suggestionPrimary}>{suggestion.primaryText}</Text>
                     {suggestion.secondaryText ? (
-                      <Text style={styles.suggestionSecondary}>{suggestion.secondaryText}</Text>
+                      <Text style={styles.suggestionSecondary}>
+                        {suggestion.secondaryText}
+                      </Text>
                     ) : null}
                   </Pressable>
                 ))}
@@ -873,7 +936,9 @@ export const PlannerScreen = () => {
                   >
                     <Text style={styles.suggestionPrimary}>{suggestion.primaryText}</Text>
                     {suggestion.secondaryText ? (
-                      <Text style={styles.suggestionSecondary}>{suggestion.secondaryText}</Text>
+                      <Text style={styles.suggestionSecondary}>
+                        {suggestion.secondaryText}
+                      </Text>
                     ) : null}
                   </Pressable>
                 ))}
@@ -922,7 +987,9 @@ export const PlannerScreen = () => {
                   Math.max(Math.round(value / stepSize) * stepSize, sliderMin),
                   sliderMax,
                 );
-                if (next !== mealWindow) setMealWindow(next);
+                if (next !== mealWindow) {
+                  setMealWindow(next);
+                }
               }}
               minimumTrackTintColor="#2563EB"
               maximumTrackTintColor="#CBD5F5"
@@ -970,7 +1037,9 @@ export const PlannerScreen = () => {
                       Math.max(Math.round(value / stepSize) * stepSize, sliderMin),
                       sliderMax,
                     );
-                    if (next !== refuelTimeMin) setRefuelTimeMin(next);
+                    if (next !== refuelTimeMin) {
+                      setRefuelTimeMin(next);
+                    }
                   }}
                   minimumTrackTintColor="#2563EB"
                   maximumTrackTintColor="#CBD5F5"
@@ -1004,7 +1073,7 @@ export const PlannerScreen = () => {
           ) : null}
         </View>
 
-        {/* Map + stats */}
+        {/* MAP CARD */}
         <View style={[styles.mapCard, isCompactWidth && styles.cardCompact]}>
           <View style={styles.mapHeader}>
             <Text style={styles.sectionTitle}>Live route</Text>
@@ -1037,10 +1106,11 @@ export const PlannerScreen = () => {
                     <Marker
                       key={`waypoint-${index}`}
                       coordinate={waypoint.location}
-                      title={`Stop ${index + 1}: ${waypoint.address || "Gas Station"}`}
+                      title={`Stop ${index + 1}: ${waypoint.address || "Stop"}`}
                       pinColor="#22c55e"
                     />
                   ))}
+
                   {stopTypeFilter !== "restaurants" &&
                     vehicleType === "GAS" &&
                     gasStations.map((station) => {
@@ -1094,7 +1164,7 @@ export const PlannerScreen = () => {
           </View>
         </View>
 
-        {/* Route overview */}
+        {/* ROUTE OVERVIEW */}
         {isRoutePlotted ? (
           <View style={[styles.statusCard, isCompactWidth && styles.cardCompact]}>
             <Text style={styles.sectionTitle}>Route overview</Text>
@@ -1113,23 +1183,57 @@ export const PlannerScreen = () => {
 
               {waypoints.length > 0 &&
                 waypoints.map((waypoint, index) => {
+                  const key = coordKey(
+                    waypoint.location.latitude,
+                    waypoint.location.longitude,
+                  );
+                  const savedKind = savedWaypointKinds[key];
+
                   let stopLabel = "Stop";
                   let stopIcon = "⛽";
                   let stopIconStyle = styles.routeStepGas;
-                  let stopName = waypoint.address || "Gas Station";
+                  let stopName = waypoint.address || "Stop";
 
-                  for (const restaurant of selectedRestaurants.values()) {
-                    if (
-                      Math.abs(restaurant.location.latitude - waypoint.location.latitude) <
-                        0.0001 &&
-                      Math.abs(restaurant.location.longitude - waypoint.location.longitude) <
-                        0.0001
-                    ) {
-                      stopLabel = "Restaurant";
-                      stopIcon = "🍽️";
+                  if (savedKind === "restaurant") {
+                    stopLabel = "Restaurant";
+                    stopIcon = "🍽️";
+                    stopIconStyle = styles.routeStepRestaurant;
+                  } else if (savedKind === "gas") {
+                    stopLabel = "Gas station";
+                    stopIcon = "⛽";
+                    stopIconStyle = styles.routeStepGas;
+                  } else if (savedKind === "ev") {
+                    stopLabel = "EV station";
+                    stopIcon = "🔌";
+                    stopIconStyle = styles.routeStepRestaurant;
+                  } else {
+                    // Fallback for live session
+                    for (const restaurant of selectedRestaurants.values()) {
+                      if (
+                        Math.abs(
+                          restaurant.location.latitude - waypoint.location.latitude,
+                        ) < 0.0001 &&
+                        Math.abs(
+                          restaurant.location.longitude - waypoint.location.longitude,
+                        ) < 0.0001
+                      ) {
+                        stopLabel = "Restaurant";
+                        stopIcon = "🍽️";
+                        stopIconStyle = styles.routeStepRestaurant;
+                        stopName = restaurant.name;
+                        break;
+                      }
+                    }
+                    if (stopLabel === "Stop" && vehicleType === "GAS") {
+                      stopLabel = "Gas station";
+                      stopIcon = "⛽";
+                      stopIconStyle = styles.routeStepGas;
+                      stopName = waypoint.address || "Gas Station";
+                    } else if (stopLabel === "Stop" && vehicleType === "EV") {
+                      stopLabel = "EV station";
+                      stopIcon = "🔌";
                       stopIconStyle = styles.routeStepRestaurant;
-                      stopName = restaurant.name;
-                      break;
+                      stopName = waypoint.address || "EV Station";
                     }
                   }
 
@@ -1230,8 +1334,9 @@ export const PlannerScreen = () => {
           </View>
         ) : null}
 
-        {/* Restaurant picks */}
-        {isRoutePlotted && (stopTypeFilter === "restaurants" || stopTypeFilter === "both") ? (
+        {/* RESTAURANTS SECTION */}
+        {isRoutePlotted &&
+        (stopTypeFilter === "restaurants" || stopTypeFilter === "both") ? (
           <View style={[styles.statusCard, isCompactWidth && styles.cardCompact]}>
             <Text style={styles.sectionTitle}>Restaurant picks</Text>
             <Text style={styles.detailSubtitle}>
@@ -1260,7 +1365,9 @@ export const PlannerScreen = () => {
                     >
                       <View style={styles.recommendationHeader}>
                         <Text style={styles.recommendationName}>{restaurant.name}</Text>
-                        {isSelected && <Text style={styles.selectedBadge}>Added to route</Text>}
+                        {isSelected && (
+                          <Text style={styles.selectedBadge}>Added to route</Text>
+                        )}
                       </View>
                       <Text style={styles.recommendationMeta}>{restaurant.address}</Text>
                       <Text style={styles.recommendationMeta}>
@@ -1305,116 +1412,50 @@ export const PlannerScreen = () => {
           </View>
         ) : null}
 
-        {/* Gas stations */}
+        {/* GAS STATIONS SECTION */}
         {isRoutePlotted &&
-          vehicleType === "GAS" &&
-          (stopTypeFilter === "stations" || stopTypeFilter === "both") && (
-            <View style={[styles.statusCard, isCompactWidth && styles.cardCompact]}>
-              <Text style={styles.sectionTitle}>Gas stations</Text>
-              <Text style={styles.detailSubtitle}>
-                {gasTargetTravelMinutes
-                  ? `Close to the ${gasTargetTravelMinutes}-minute mark of your trip`
-                  : `Aiming for the ${refuelTimeMin || 0}-minute window`}
+        vehicleType === "GAS" &&
+        (stopTypeFilter === "stations" || stopTypeFilter === "both") ? (
+          <View style={[styles.statusCard, isCompactWidth && styles.cardCompact]}>
+            <Text style={styles.sectionTitle}>Gas stations</Text>
+            <Text style={styles.detailSubtitle}>
+              {gasTargetTravelMinutes
+                ? `Close to the ${gasTargetTravelMinutes}-minute mark of your trip`
+                : `Aiming for the ${refuelTimeMin || 0}-minute window`}
+            </Text>
+
+            {isGasStationsLoading ? (
+              <Text style={styles.suggestionNote}>
+                Finding gas stations near your route…
               </Text>
+            ) : gasStations.length ? (
+              <View style={styles.recommendationList}>
+                {gasStations.map((station) => {
+                  const isSelected = waypoints.some(
+                    (wp) =>
+                      Math.abs(wp.location.latitude - station.location.latitude) < 0.0001 &&
+                      Math.abs(wp.location.longitude - station.location.longitude) <
+                        0.0001,
+                  );
+                  const stationPrices =
+                    selectedGasStation?.id === station.id
+                      ? gasStationDetails.prices
+                      : station.prices;
 
-              {isGasStationsLoading ? (
-                <Text style={styles.suggestionNote}>
-                  Finding gas stations near your route…
-                </Text>
-              ) : gasStations.length ? (
-                <View style={styles.recommendationList}>
-                  {gasStations.map((station) => {
-                    const isSelected = waypoints.some(
-                      (wp) =>
-                        Math.abs(wp.location.latitude - station.location.latitude) < 0.0001 &&
-                        Math.abs(wp.location.longitude - station.location.longitude) < 0.0001,
-                    );
-                    const stationPrices =
-                      selectedGasStation?.id === station.id
-                        ? gasStationDetails.prices
-                        : station.prices;
-
-                    return (
-                      <Pressable
-                        key={station.id}
-                        style={[
-                          styles.recommendationItem,
-                          isSelected && styles.recommendationItemSelected,
-                        ]}
-                        onPress={() => handleSelectGasStation(station)}
-                      >
-                        <View style={styles.recommendationHeader}>
-                          <Text style={styles.recommendationName}>{station.name}</Text>
-                          {isSelected && (
-                            <Text style={styles.selectedBadge}>Added to route</Text>
-                          )}
-                        </View>
-                        <Text style={styles.recommendationMeta}>{station.address}</Text>
-                        <Text style={styles.recommendationMeta}>
-                          {station.travelTimeMinutes
-                            ? `~${station.travelTimeMinutes} min from start`
-                            : "Along your current route"}
-                        </Text>
-                        {stationPrices && stationPrices.length > 0 ? (
-                          <View style={styles.priceContainer}>
-                            {stationPrices.map((price, idx) => (
-                              <Text key={idx} style={styles.priceText}>
-                                {price.type}: {price.currency}{" "}
-                                {typeof price.price === "number"
-                                  ? price.price.toFixed(2)
-                                  : price.price}
-                              </Text>
-                            ))}
-                          </View>
-                        ) : selectedGasStation?.id === station.id &&
-                          gasStationDetails.isLoading ? (
-                          <Text style={styles.suggestionNote}>Checking for pricing…</Text>
-                        ) : selectedGasStation?.id === station.id &&
-                          !gasStationDetails.isLoading &&
-                          !gasStationDetails.prices ? (
-                          <Text style={styles.suggestionNote}>
-                            Pricing not available for this station.
-                          </Text>
-                        ) : null}
-                      </Pressable>
-                    );
-                  })}
-                </View>
-              ) : (
-                <Text style={styles.suggestionNote}>
-                  We didn't find gas stations near that window. Try adjusting the refueling time or
-                  search again shortly.
-                </Text>
-              )}
-
-              {gasStationsError ? (
-                <Text style={styles.inlineError}>{gasStationsError}</Text>
-              ) : null}
-            </View>
-          )}
-
-        {/* EV stations */}
-        {isRoutePlotted &&
-          vehicleType === "EV" &&
-          (stopTypeFilter === "stations" || stopTypeFilter === "both") && (
-            <View style={[styles.statusCard, isCompactWidth && styles.cardCompact]}>
-              <Text style={styles.sectionTitle}>EV charging stations</Text>
-              <Text style={styles.detailSubtitle}>
-                {evTargetTravelMinutes
-                  ? `Close to the ${evTargetTravelMinutes}-minute mark of your trip`
-                  : `Aiming for the ${refuelTimeMin || 0}-minute window`}
-              </Text>
-
-              {isEVStationsLoading ? (
-                <Text style={styles.suggestionNote}>
-                  Finding EV charging stations near your route…
-                </Text>
-              ) : evStations.length ? (
-                <View style={styles.recommendationList}>
-                  {evStations.map((station) => (
-                    <View key={station.id} style={styles.recommendationItem}>
+                  return (
+                    <Pressable
+                      key={station.id}
+                      style={[
+                        styles.recommendationItem,
+                        isSelected && styles.recommendationItemSelected,
+                      ]}
+                      onPress={() => handleSelectGasStation(station)}
+                    >
                       <View style={styles.recommendationHeader}>
                         <Text style={styles.recommendationName}>{station.name}</Text>
+                        {isSelected && (
+                          <Text style={styles.selectedBadge}>Added to route</Text>
+                        )}
                       </View>
                       <Text style={styles.recommendationMeta}>{station.address}</Text>
                       <Text style={styles.recommendationMeta}>
@@ -1422,23 +1463,90 @@ export const PlannerScreen = () => {
                           ? `~${station.travelTimeMinutes} min from start`
                           : "Along your current route"}
                       </Text>
+                      {stationPrices && stationPrices.length > 0 ? (
+                        <View style={styles.priceContainer}>
+                          {stationPrices.map((price, idx) => (
+                            <Text key={idx} style={styles.priceText}>
+                              {price.type}: {price.currency}{" "}
+                              {typeof price.price === "number"
+                                ? price.price.toFixed(2)
+                                : price.price}
+                            </Text>
+                          ))}
+                        </View>
+                      ) : selectedGasStation?.id === station.id &&
+                        gasStationDetails.isLoading ? (
+                        <Text style={styles.suggestionNote}>Checking for pricing…</Text>
+                      ) : selectedGasStation?.id === station.id &&
+                        !gasStationDetails.isLoading &&
+                        !gasStationDetails.prices ? (
+                        <Text style={styles.suggestionNote}>
+                          Pricing not available for this station.
+                        </Text>
+                      ) : null}
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ) : (
+              <Text style={styles.suggestionNote}>
+                We didn't find gas stations near that window. Try adjusting the refueling time or
+                search again shortly.
+              </Text>
+            )}
+
+            {gasStationsError ? (
+              <Text style={styles.inlineError}>{gasStationsError}</Text>
+            ) : null}
+          </View>
+        ) : null}
+
+        {/* EV STATIONS SECTION */}
+        {isRoutePlotted &&
+        vehicleType === "EV" &&
+        (stopTypeFilter === "stations" || stopTypeFilter === "both") ? (
+          <View style={[styles.statusCard, isCompactWidth && styles.cardCompact]}>
+            <Text style={styles.sectionTitle}>EV charging stations</Text>
+            <Text style={styles.detailSubtitle}>
+              {evTargetTravelMinutes
+                ? `Close to the ${evTargetTravelMinutes}-minute mark of your trip`
+                : `Aiming for the ${refuelTimeMin || 0}-minute window`}
+            </Text>
+
+            {isEVStationsLoading ? (
+              <Text style={styles.suggestionNote}>
+                Finding EV charging stations near your route…
+              </Text>
+            ) : evStations.length ? (
+              <View style={styles.recommendationList}>
+                {evStations.map((station) => (
+                  <View key={station.id} style={styles.recommendationItem}>
+                    <View style={styles.recommendationHeader}>
+                      <Text style={styles.recommendationName}>{station.name}</Text>
                     </View>
-                  ))}
-                </View>
-              ) : (
-                <Text style={styles.suggestionNote}>
-                  We didn't find EV charging stations near that window. Try adjusting the refueling
-                  time or search again shortly.
-                </Text>
-              )}
+                    <Text style={styles.recommendationMeta}>{station.address}</Text>
+                    <Text style={styles.recommendationMeta}>
+                      {station.travelTimeMinutes
+                        ? `~${station.travelTimeMinutes} min from start`
+                        : "Along your current route"}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <Text style={styles.suggestionNote}>
+                We didn't find EV charging stations near that window. Try adjusting the refueling
+                time or search again shortly.
+              </Text>
+            )}
 
-              {evStationsError ? (
-                <Text style={styles.inlineError}>{evStationsError}</Text>
-              ) : null}
-            </View>
-          )}
+            {evStationsError ? (
+              <Text style={styles.inlineError}>{evStationsError}</Text>
+            ) : null}
+          </View>
+        ) : null}
 
-        {/* Route stops list */}
+        {/* ROUTE STOPS LIST */}
         {waypoints.length > 0 ? (
           <View style={[styles.statusCard, isCompactWidth && styles.cardCompact]}>
             <View style={styles.routeStopsHeader}>
@@ -1448,19 +1556,46 @@ export const PlannerScreen = () => {
               </Pressable>
             </View>
             {waypoints.map((waypoint, index) => {
-              let waypointName = waypoint.address || "Stop";
-              let waypointType = "Gas Station";
-              let waypointIcon = "⛽";
+              const key = coordKey(
+                waypoint.location.latitude,
+                waypoint.location.longitude,
+              );
+              const savedKind = savedWaypointKinds[key];
 
-              for (const restaurant of selectedRestaurants.values()) {
-                if (
-                  Math.abs(restaurant.location.latitude - waypoint.location.latitude) < 0.0001 &&
-                  Math.abs(restaurant.location.longitude - waypoint.location.longitude) < 0.0001
-                ) {
-                  waypointName = restaurant.name;
-                  waypointType = "Restaurant";
-                  waypointIcon = "🍽️";
-                  break;
+              let waypointName = waypoint.address || "Stop";
+              let waypointType = "Stop";
+              let waypointIcon = "📍";
+
+              if (savedKind === "restaurant") {
+                waypointType = "Restaurant";
+                waypointIcon = "🍽️";
+              } else if (savedKind === "gas") {
+                waypointType = "Gas Station";
+                waypointIcon = "⛽";
+              } else if (savedKind === "ev") {
+                waypointType = "EV Station";
+                waypointIcon = "🔌";
+              } else {
+                // Fallback for live session
+                for (const restaurant of selectedRestaurants.values()) {
+                  if (
+                    Math.abs(restaurant.location.latitude - waypoint.location.latitude) <
+                      0.0001 &&
+                    Math.abs(restaurant.location.longitude - waypoint.location.longitude) <
+                      0.0001
+                  ) {
+                    waypointType = "Restaurant";
+                    waypointIcon = "🍽️";
+                    waypointName = restaurant.name;
+                    break;
+                  }
+                }
+                if (waypointType === "Stop" && vehicleType === "GAS") {
+                  waypointType = "Gas Station";
+                  waypointIcon = "⛽";
+                } else if (waypointType === "Stop" && vehicleType === "EV") {
+                  waypointType = "EV Station";
+                  waypointIcon = "🔌";
                 }
               }
 
@@ -1488,7 +1623,7 @@ export const PlannerScreen = () => {
           </View>
         ) : null}
 
-        {/* Trip synopsis */}
+        {/* TRIP SYNOPSIS */}
         {result ? (
           <View style={[styles.statusCard, isCompactWidth && styles.cardCompact]}>
             <Text style={styles.sectionTitle}>Trip synopsis</Text>
@@ -1937,6 +2072,13 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#0F172A",
   },
+  waypointType: {
+    fontSize: 11,
+    color: "#64748B",
+    marginTop: 2,
+    textTransform: "uppercase",
+    fontWeight: "600",
+  },
   removeWaypointButton: {
     paddingVertical: 6,
     paddingHorizontal: 12,
@@ -2041,13 +2183,4 @@ const styles = StyleSheet.create({
   waypointIconText: {
     fontSize: 16,
   },
-  waypointType: {
-    fontSize: 11,
-    color: "#64748B",
-    marginTop: 2,
-    textTransform: "uppercase",
-    fontWeight: "600",
-  },
 });
-
-export default PlannerScreen;
