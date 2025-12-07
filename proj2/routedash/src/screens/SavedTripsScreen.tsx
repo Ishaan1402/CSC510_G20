@@ -1,431 +1,370 @@
 // src/screens/SavedTripsScreen.tsx
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
   View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  Pressable,
+  Alert,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { useNavigation, useFocusEffect } from "@react-navigation/native";
-import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 
-import { LogoutButton } from "../components/LogoutButton";
-import { loadSavedTrips, deleteSavedTrip } from "../utils/savedTripsStorage";
-import type { SavedTrip, SavedTripWaypoint } from "../types/savedTrip";
 import type { RootStackParamList } from "../navigation/types";
+import type { SavedTrip } from "../types/savedTrip";
+import { loadSavedTrips, deleteSavedTrip } from "../utils/savedTripsStorage";
 
-type Nav = NativeStackNavigationProp<RootStackParamList, "SavedTrips">;
+type Props = NativeStackScreenProps<RootStackParamList, "SavedTrips">;
 
-const formatDate = (iso: string) => {
+const formatShortDateTime = (iso: string) => {
   const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "Unknown date";
   return d.toLocaleString(undefined, {
     month: "short",
     day: "numeric",
-    hour: "2-digit",
+    hour: "numeric",
     minute: "2-digit",
   });
 };
 
-const getWaypointIconAndLabel = (wp: SavedTripWaypoint): { icon: string; label: string } => {
-  switch (wp.kind) {
-    case "restaurant":
-      return { icon: "🍽️", label: "Restaurant" };
+const formatStopType = (stopType: SavedTrip["stopType"]) => {
+  switch (stopType) {
+    case "food":
+      return "FOOD";
     case "gas":
-      return { icon: "⛽", label: "Gas station" };
+      return "GAS";
     case "ev":
-      return { icon: "🔌", label: "EV station" };
+      return "EV";
+    case "mixed":
     default:
-      return { icon: "📍", label: "Stop" };
+      return "MIXED";
   }
 };
 
-export const SavedTripsScreen: React.FC = () => {
-  const navigation = useNavigation<Nav>();
+export const SavedTripsScreen: React.FC<Props> = ({ navigation }) => {
   const [trips, setTrips] = useState<SavedTrip[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   const refreshTrips = async () => {
     setIsLoading(true);
-    try {
-      const loaded = await loadSavedTrips();
-      setTrips(loaded);
-    } catch (e) {
-      console.warn("Failed to load saved trips", e);
-    } finally {
-      setIsLoading(false);
-    }
+    const data = await loadSavedTrips();
+    setTrips(data);
+    setIsLoading(false);
   };
 
   useEffect(() => {
-    void refreshTrips();
-  }, []);
+    const unsubscribe = navigation.addListener("focus", refreshTrips);
+    return unsubscribe;
+  }, [navigation]);
 
-  useFocusEffect(
-    useCallback(() => {
-      // reload when screen gets focus
-      void refreshTrips();
-    }, []),
-  );
-
-  const handleUseTrip = (trip: SavedTrip) => {
+  const handleUseRoute = (trip: SavedTrip) => {
     navigation.navigate("Planner", {
       fromSavedTrip: true,
       savedTrip: trip,
     });
   };
 
-  const handleDeleteTrip = (trip: SavedTrip) => {
-    Alert.alert(
-      "Delete saved trip?",
-      `Remove the trip from ${trip.origin} to ${trip.destination}?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              await deleteSavedTrip(trip.id);
-              await refreshTrips();
-            } catch (e) {
-              console.warn("Failed to delete saved trip", e);
-              Alert.alert("Oops", "We couldn't delete this trip right now. Try again shortly.");
-            }
-          },
+  const handleDeleteTrip = (tripId: string) => {
+    Alert.alert("Delete trip", "Are you sure you want to delete this saved trip?", [
+      {
+        text: "Cancel",
+        style: "cancel",
+      },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: async () => {
+          await deleteSavedTrip(tripId);
+          refreshTrips();
         },
-      ],
-    );
+      },
+    ]);
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <View style={styles.header}>
-        <View style={styles.headerRow}>
-          <View>
-            <Text style={styles.brandBadge}>RouteDash</Text>
-            <Text style={styles.headerTitle}>Saved Trips</Text>
-            <Text style={styles.headerSubtitle}>
-              Reuse your favorite routes, even when you're offline.
-            </Text>
-          </View>
-          <LogoutButton />
-        </View>
-      </View>
-
-      {isLoading ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#2563EB" />
-          <Text style={styles.loadingText}>Loading your saved trips…</Text>
-        </View>
-      ) : trips.length === 0 ? (
-        <View style={styles.emptyState}>
-          <Text style={styles.emptyTitle}>No saved trips yet</Text>
-          <Text style={styles.emptySubtitle}>
-            Plan a route in the Trip Planner, then tap “Save trip for later” to see it here.
+    <View style={styles.screen}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Simple internal header (no Logout here) */}
+        <View style={styles.headerBlock}>
+          <Text style={styles.brandBadge}>RouteDash</Text>
+          <Text style={styles.title}>Saved Trips</Text>
+          <Text style={styles.subtitle}>
+            Reuse your favorite routes, even when you&apos;re offline.
           </Text>
-          <Pressable
-            style={styles.primaryButton}
-            onPress={() => navigation.navigate("Planner")}
-          >
-            <Text style={styles.primaryButtonText}>Plan a new trip</Text>
-          </Pressable>
         </View>
-      ) : (
-        <ScrollView
-          style={styles.list}
-          contentContainerStyle={styles.listContent}
-          showsVerticalScrollIndicator={false}
-        >
-          {trips.map((trip) => (
-            <View key={trip.id} style={styles.tripCard}>
-              <View style={styles.tripHeaderRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.tripRouteText} numberOfLines={1}>
-                    {trip.origin} → {trip.destination}
-                  </Text>
-                  <Text style={styles.tripMetaText}>
-                    Saved {formatDate(trip.createdAt)}
-                  </Text>
-                  {trip.routeSnapshot ? (
-                    <Text style={styles.tripMetaText}>
-                      {trip.routeSnapshot.durationText} • {trip.routeSnapshot.distanceText}
+
+        {isLoading ? (
+          <Text style={styles.emptyText}>Loading your saved trips…</Text>
+        ) : trips.length === 0 ? (
+          <Text style={styles.emptyText}>
+            You haven&apos;t saved any trips yet. Plan a route and tap &quot;Save trip for
+            later&quot; to see it here.
+          </Text>
+        ) : (
+          trips.map((trip) => {
+            const primaryRestaurant = trip.restaurant;
+            const stops = trip.waypoints ?? [];
+
+            return (
+              <View key={trip.id} style={styles.card}>
+                {/* Origin / destination row */}
+                <View style={styles.cardHeaderRow}>
+                  <Text
+                    style={styles.routeText}
+                    numberOfLines={1}
+                  >{`${trip.origin} → ${trip.destination}`}</Text>
+                  <View style={styles.stopTypePill}>
+                    <Text style={styles.stopTypeText}>
+                      {formatStopType(trip.stopType)}
                     </Text>
-                  ) : null}
+                  </View>
                 </View>
-                <View style={styles.chip}>
-                  <Text style={styles.chipText}>{trip.stopType.toUpperCase()}</Text>
+
+                {/* Meta row: saved at + snapshot */}
+                <Text style={styles.savedAtText}>
+                  Saved {formatShortDateTime(trip.createdAt)}
+                </Text>
+                {trip.routeSnapshot ? (
+                  <Text style={styles.metaText}>
+                    {trip.routeSnapshot.durationText || "—"} ·{" "}
+                    {trip.routeSnapshot.distanceText || "—"}
+                  </Text>
+                ) : null}
+
+                {/* Primary restaurant (if any) */}
+                {primaryRestaurant ? (
+                  <View style={styles.sectionBlock}>
+                    <Text style={styles.sectionLabel}>Primary restaurant:</Text>
+                    <Text style={styles.sectionValue}>{primaryRestaurant.name}</Text>
+                    <Text style={styles.sectionSubValue}>
+                      {primaryRestaurant.address}
+                    </Text>
+                  </View>
+                ) : null}
+
+                {/* Stops list */}
+                {stops.length > 0 && (
+                  <View style={styles.sectionBlock}>
+                    <Text style={styles.sectionLabel}>Stops on this route</Text>
+                    {stops.map((stop, index) => {
+                      let icon = "•";
+                      let label = "Stop";
+
+                      if (stop.kind === "restaurant") {
+                        icon = "🍽️";
+                        label = "Restaurant";
+                      } else if (stop.kind === "gas") {
+                        icon = "⛽";
+                        label = "Gas station";
+                      } else if (stop.kind === "ev") {
+                        icon = "🔌";
+                        label = "EV station";
+                      }
+
+                      return (
+                        <View key={`${trip.id}-stop-${index}`} style={styles.stopRow}>
+                          <View style={styles.stopIconCircle}>
+                            <Text style={styles.stopIconText}>{icon}</Text>
+                          </View>
+                          <View style={styles.stopTextBlock}>
+                            <Text style={styles.stopTitle}>
+                              {`Stop ${index + 1} · ${label}`}
+                            </Text>
+                            {stop.address ? (
+                              <Text style={styles.stopAddress} numberOfLines={1}>
+                                {stop.address}
+                              </Text>
+                            ) : null}
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </View>
+                )}
+
+                {/* Actions */}
+                <View style={styles.actionsRow}>
+                  <Pressable
+                    style={styles.useButton}
+                    onPress={() => handleUseRoute(trip)}
+                  >
+                    <Text style={styles.useButtonText}>Use this route</Text>
+                  </Pressable>
+                  <Pressable
+                    style={styles.deleteButton}
+                    onPress={() => handleDeleteTrip(trip.id)}
+                  >
+                    <Text style={styles.deleteButtonText}>Delete</Text>
+                  </Pressable>
                 </View>
               </View>
-
-              {trip.restaurant ? (
-                <View style={styles.restaurantRow}>
-                  <Text style={styles.restaurantLabel}>Primary restaurant:</Text>
-                  <Text style={styles.restaurantName}>{trip.restaurant.name}</Text>
-                  <Text style={styles.restaurantAddress}>{trip.restaurant.address}</Text>
-                </View>
-              ) : null}
-
-              {trip.waypoints && trip.waypoints.length > 0 ? (
-                <View style={styles.stopsSection}>
-                  <Text style={styles.stopsTitle}>Stops on this route</Text>
-                  {trip.waypoints.map((wp, index) => {
-                    const { icon, label } = getWaypointIconAndLabel(wp);
-                    return (
-                      <View key={`${trip.id}-wp-${index}`} style={styles.stopRow}>
-                        <View style={styles.stopIconCircle}>
-                          <Text style={styles.stopIconText}>{icon}</Text>
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <Text style={styles.stopLabel}>
-                            Stop {index + 1} · {label}
-                          </Text>
-                          <Text style={styles.stopAddress} numberOfLines={2}>
-                            {wp.address ??
-                              `${wp.latitude.toFixed(3)}, ${wp.longitude.toFixed(3)}`}
-                          </Text>
-                        </View>
-                      </View>
-                    );
-                  })}
-                </View>
-              ) : null}
-
-              <View style={styles.cardActionsRow}>
-                <Pressable
-                  style={styles.secondaryButton}
-                  onPress={() => handleUseTrip(trip)}
-                >
-                  <Text style={styles.secondaryButtonText}>Use this route</Text>
-                </Pressable>
-                <Pressable
-                  style={styles.deleteButton}
-                  onPress={() => handleDeleteTrip(trip)}
-                >
-                  <Text style={styles.deleteButtonText}>Delete</Text>
-                </Pressable>
-              </View>
-            </View>
-          ))}
-        </ScrollView>
-      )}
-    </SafeAreaView>
+            );
+          })
+        )}
+      </ScrollView>
+    </View>
   );
 };
 
-// optional default export if you ever want `import SavedTripsScreen from ...`
-export default SavedTripsScreen;
-
 const styles = StyleSheet.create({
-  safeArea: {
+  screen: {
     flex: 1,
     backgroundColor: "#F1F5F9",
   },
-  header: {
-    paddingHorizontal: 24,
-    paddingBottom: 12,
-    paddingTop: 16,
-    backgroundColor: "#FFFFFF",
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#E2E8F0",
+  scrollContent: {
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    paddingBottom: 32,
   },
-  headerRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
+  headerBlock: {
+    marginBottom: 16,
   },
   brandBadge: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: "600",
     color: "#2563EB",
     marginBottom: 4,
   },
-  headerTitle: {
+  title: {
     fontSize: 22,
     fontWeight: "700",
     color: "#0F172A",
   },
-  headerSubtitle: {
+  subtitle: {
+    marginTop: 4,
     fontSize: 13,
     color: "#64748B",
-    marginTop: 2,
   },
-  loadingContainer: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 24,
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 14,
-    color: "#475569",
-  },
-  emptyState: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 32,
-  },
-  emptyTitle: {
-    fontSize: 20,
-    fontWeight: "700",
-    color: "#0F172A",
-    marginBottom: 6,
-    textAlign: "center",
-  },
-  emptySubtitle: {
+  emptyText: {
+    marginTop: 24,
     fontSize: 14,
     color: "#64748B",
     textAlign: "center",
-    marginBottom: 20,
   },
-  primaryButton: {
-    borderRadius: 14,
-    backgroundColor: "#2563EB",
-    paddingVertical: 14,
-    paddingHorizontal: 24,
-  },
-  primaryButtonText: {
-    color: "#FFFFFF",
-    fontSize: 15,
-    fontWeight: "600",
-  },
-  list: {
-    flex: 1,
-  },
-  listContent: {
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    paddingBottom: 32,
-    gap: 16,
-  },
-  tripCard: {
+  card: {
     backgroundColor: "#FFFFFF",
-    borderRadius: 18,
+    borderRadius: 20,
     padding: 16,
+    marginTop: 12,
     shadowColor: "#0F172A",
     shadowOpacity: 0.04,
-    shadowRadius: 16,
     shadowOffset: { width: 0, height: 8 },
+    shadowRadius: 16,
     elevation: 3,
   },
-  tripHeaderRow: {
+  cardHeaderRow: {
     flexDirection: "row",
+    alignItems: "center",
     justifyContent: "space-between",
-    alignItems: "flex-start",
-    marginBottom: 8,
+    marginBottom: 4,
   },
-  tripRouteText: {
+  routeText: {
+    flex: 1,
+    marginRight: 8,
     fontSize: 15,
-    fontWeight: "700",
+    fontWeight: "600",
     color: "#0F172A",
   },
-  tripMetaText: {
-    fontSize: 12,
-    color: "#64748B",
-    marginTop: 2,
-  },
-  chip: {
-    paddingHorizontal: 8,
+  stopTypePill: {
+    paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 999,
-    backgroundColor: "#E0F2FE",
+    backgroundColor: "#DBEAFE",
   },
-  chipText: {
+  stopTypeText: {
     fontSize: 11,
     fontWeight: "700",
-    color: "#0369A1",
+    color: "#1D4ED8",
   },
-  restaurantRow: {
-    marginTop: 8,
+  savedAtText: {
+    fontSize: 11,
+    color: "#94A3B8",
+    marginTop: 4,
   },
-  restaurantLabel: {
+  metaText: {
     fontSize: 12,
-    fontWeight: "600",
-    color: "#64748B",
+    color: "#475569",
+    marginTop: 2,
   },
-  restaurantName: {
+  sectionBlock: {
+    marginTop: 12,
+  },
+  sectionLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#64748B",
+    marginBottom: 2,
+  },
+  sectionValue: {
     fontSize: 14,
     fontWeight: "600",
     color: "#0F172A",
   },
-  restaurantAddress: {
+  sectionSubValue: {
     fontSize: 12,
     color: "#64748B",
     marginTop: 2,
-  },
-  stopsSection: {
-    marginTop: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "#E2E8F0",
-    paddingTop: 8,
-  },
-  stopsTitle: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#0F172A",
-    marginBottom: 6,
   },
   stopRow: {
     flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 10,
-    marginBottom: 6,
+    alignItems: "center",
+    marginTop: 6,
   },
   stopIconCircle: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     backgroundColor: "#EFF6FF",
     alignItems: "center",
     justifyContent: "center",
+    marginRight: 8,
   },
   stopIconText: {
-    fontSize: 14,
+    fontSize: 16,
   },
-  stopLabel: {
-    fontSize: 12,
+  stopTextBlock: {
+    flex: 1,
+  },
+  stopTitle: {
+    fontSize: 13,
     fontWeight: "600",
     color: "#0F172A",
   },
   stopAddress: {
     fontSize: 12,
     color: "#64748B",
-    marginTop: 1,
+    marginTop: 2,
   },
-  cardActionsRow: {
+  actionsRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "center",
-    marginTop: 12,
-    gap: 8,
+    marginTop: 16,
   },
-  secondaryButton: {
+  useButton: {
     flex: 1,
+    marginRight: 8,
+    paddingVertical: 12,
     borderRadius: 12,
-    paddingVertical: 10,
+    backgroundColor: "#DBEAFE",
     alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#E0F2FE",
   },
-  secondaryButtonText: {
-    color: "#0F172A",
+  useButtonText: {
     fontSize: 14,
     fontWeight: "600",
+    color: "#1D4ED8",
   },
   deleteButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 18,
     borderRadius: 12,
     backgroundColor: "#FEE2E2",
+    alignItems: "center",
+    justifyContent: "center",
   },
   deleteButtonText: {
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: "600",
     color: "#DC2626",
   },
