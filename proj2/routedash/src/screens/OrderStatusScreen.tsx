@@ -1,8 +1,19 @@
 // src/screens/OrderStatusScreen.tsx
-import React from "react";
-import { ScrollView, View, Text, StyleSheet } from "react-native";
+import React, { useState } from "react";
+import {
+  ScrollView,
+  View,
+  Text,
+  StyleSheet,
+  Pressable,
+  TextInput,
+  Alert,
+  ActivityIndicator,
+} from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
-import type { RootStackParamList, OrderStatusValue } from "../navigation/types";
+import { apiPatch } from "../api/client";
+import { useDirections } from "../hooks/useDirections";
+import type { RootStackParamList, OrderStatusValue, OrderSummary } from "../navigation/types";
 
 type OrderStatusScreenProps = NativeStackScreenProps<RootStackParamList, "OrderStatus">;
 
@@ -23,7 +34,13 @@ const STATUS_COLORS: Record<OrderStatusValue, string> = {
 };
 
 export const OrderStatusScreen: React.FC<OrderStatusScreenProps> = ({ route }) => {
-  const { order } = route.params;
+  const { order: initialOrder } = route.params;
+  const [order, setOrder] = useState<OrderSummary & { createdAt?: string }>(initialOrder);
+  const [isEditingRoute, setIsEditingRoute] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [routeOrigin, setRouteOrigin] = useState(order.routeOrigin);
+  const [routeDestination, setRouteDestination] = useState(order.routeDestination);
+  const { fetchRoute, result: directionsResult, isLoading: isCalculatingRoute } = useDirections();
 
   if (!order) {
     return (
@@ -33,8 +50,51 @@ export const OrderStatusScreen: React.FC<OrderStatusScreenProps> = ({ route }) =
     );
   }
 
+  const canUpdateRoute = order.status === "PENDING" || order.status === "PREPARING";
   const createdLabel = order.createdAt ? new Date(order.createdAt).toLocaleString() : undefined;
   const statusColor = STATUS_COLORS[order.status] || "#E2E8F0";
+
+  const handleCalculateETA = async () => {
+    if (!routeOrigin.trim() || !routeDestination.trim()) {
+      Alert.alert("Error", "Please enter both origin and destination");
+      return;
+    }
+
+    const success = await fetchRoute(routeOrigin.trim(), routeDestination.trim());
+    if (!success) {
+      Alert.alert("Error", "Failed to calculate route. Please check your addresses.");
+    }
+  };
+
+  const handleUpdateRoute = async () => {
+    if (!routeOrigin.trim() || !routeDestination.trim()) {
+      Alert.alert("Error", "Please enter both origin and destination");
+      return;
+    }
+
+    // If we have a directions result, use its duration; otherwise use the existing ETA
+    let newEtaMin = order.pickupEtaMin;
+    if (directionsResult?.leg?.durationSeconds) {
+      newEtaMin = Math.round(directionsResult.leg.durationSeconds / 60);
+    }
+
+    setIsUpdating(true);
+    try {
+      const response = await apiPatch<{ order: OrderSummary }>(`/api/orders/${order.id}/route`, {
+        routeOrigin: routeOrigin.trim(),
+        routeDestination: routeDestination.trim(),
+        pickupEtaMin: newEtaMin,
+      });
+
+      setOrder(response.order);
+      setIsEditingRoute(false);
+      Alert.alert("Success", "Route updated successfully");
+    } catch (error) {
+      Alert.alert("Error", (error as Error).message || "Failed to update route");
+    } finally {
+      setIsUpdating(false);
+    }
+  };
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -57,11 +117,85 @@ export const OrderStatusScreen: React.FC<OrderStatusScreenProps> = ({ route }) =
         <View style={styles.divider} />
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Route</Text>
-          <Text style={styles.infoText}>
-            {order.routeOrigin} → {order.routeDestination}
-          </Text>
-          <Text style={styles.metaText}>Pickup ETA: {order.pickupEtaMin} minutes</Text>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Route</Text>
+            {canUpdateRoute && !isEditingRoute && (
+              <Pressable onPress={() => setIsEditingRoute(true)} style={styles.editButton}>
+                <Text style={styles.editButtonText}>Edit</Text>
+              </Pressable>
+            )}
+          </View>
+          {isEditingRoute ? (
+            <View style={styles.routeEditContainer}>
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Origin</Text>
+                <TextInput
+                  style={styles.input}
+                  value={routeOrigin}
+                  onChangeText={setRouteOrigin}
+                  placeholder="Enter origin address"
+                  editable={!isUpdating}
+                />
+              </View>
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Destination</Text>
+                <TextInput
+                  style={styles.input}
+                  value={routeDestination}
+                  onChangeText={setRouteDestination}
+                  placeholder="Enter destination address"
+                  editable={!isUpdating}
+                />
+              </View>
+              <Pressable
+                onPress={handleCalculateETA}
+                style={[styles.calculateButton, isCalculatingRoute && styles.buttonDisabled]}
+                disabled={isCalculatingRoute || isUpdating}
+              >
+                {isCalculatingRoute ? (
+                  <ActivityIndicator color="#FFF" size="small" />
+                ) : (
+                  <Text style={styles.calculateButtonText}>Calculate ETA</Text>
+                )}
+              </Pressable>
+              {directionsResult && (
+                <Text style={styles.etaPreview}>
+                  New ETA: ~{Math.round(directionsResult.leg.durationSeconds / 60)} minutes
+                </Text>
+              )}
+              <View style={styles.routeEditActions}>
+                <Pressable
+                  onPress={() => {
+                    setIsEditingRoute(false);
+                    setRouteOrigin(order.routeOrigin);
+                    setRouteDestination(order.routeDestination);
+                  }}
+                  style={[styles.cancelButton, isUpdating && styles.buttonDisabled]}
+                  disabled={isUpdating}
+                >
+                  <Text style={styles.cancelButtonText}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  onPress={handleUpdateRoute}
+                  style={[styles.updateButton, isUpdating && styles.buttonDisabled]}
+                  disabled={isUpdating}
+                >
+                  {isUpdating ? (
+                    <ActivityIndicator color="#FFF" size="small" />
+                  ) : (
+                    <Text style={styles.updateButtonText}>Update Route</Text>
+                  )}
+                </Pressable>
+              </View>
+            </View>
+          ) : (
+            <>
+              <Text style={styles.infoText}>
+                {order.routeOrigin} → {order.routeDestination}
+              </Text>
+              <Text style={styles.metaText}>Pickup ETA: {order.pickupEtaMin} minutes</Text>
+            </>
+          )}
         </View>
 
         <View style={styles.divider} />
@@ -207,5 +341,92 @@ const styles = StyleSheet.create({
     fontSize: 16,
     textAlign: "center",
     marginTop: 24,
+  },
+  sectionHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 4,
+  },
+  editButton: {
+    paddingVertical: 4,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    backgroundColor: "#EFF6FF",
+  },
+  editButtonText: {
+    color: "#2563EB",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  routeEditContainer: {
+    gap: 12,
+    marginTop: 8,
+  },
+  inputGroup: {
+    gap: 6,
+  },
+  inputLabel: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#475569",
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: "#CBD5E1",
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 15,
+    backgroundColor: "#FFF",
+    color: "#1E293B",
+  },
+  calculateButton: {
+    backgroundColor: "#64748B",
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: "center",
+  },
+  calculateButtonText: {
+    color: "#FFF",
+    fontSize: 15,
+    fontWeight: "600",
+  },
+  etaPreview: {
+    fontSize: 14,
+    color: "#2563EB",
+    fontWeight: "600",
+    textAlign: "center",
+  },
+  routeEditActions: {
+    flexDirection: "row",
+    gap: 12,
+    marginTop: 4,
+  },
+  cancelButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: "center",
+    backgroundColor: "#F1F5F9",
+  },
+  cancelButtonText: {
+    color: "#475569",
+    fontSize: 15,
+    fontWeight: "600",
+  },
+  updateButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: "center",
+    backgroundColor: "#2563EB",
+  },
+  updateButtonText: {
+    color: "#FFF",
+    fontSize: 15,
+    fontWeight: "600",
+  },
+  buttonDisabled: {
+    opacity: 0.5,
   },
 });

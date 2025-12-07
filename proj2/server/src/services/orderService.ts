@@ -193,6 +193,44 @@ export const getOrderForCustomer = async (orderId: string, customerId: string) =
   return attachFinancials(order);
 };
 
+type UpdateOrderRouteInput = {
+  routeOrigin: string;
+  routeDestination: string;
+  pickupEtaMin: number;
+};
+
+export const updateOrderRoute = async (
+  orderId: string,
+  customerId: string,
+  input: UpdateOrderRouteInput,
+) => {
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    include: customerOrderInclude,
+  });
+
+  if (!order || order.customerId !== customerId) {
+    throw new HttpError(404, "Order not found");
+  }
+
+  // Only allow route updates for orders that are still pending or being prepared
+  if (order.status !== OrderStatus.PENDING && order.status !== OrderStatus.PREPARING) {
+    throw new HttpError(400, "Cannot update route for orders that are already ready or completed");
+  }
+
+  const updated = await prisma.order.update({
+    where: { id: orderId },
+    data: {
+      routeOrigin: input.routeOrigin,
+      routeDestination: input.routeDestination,
+      pickupEtaMin: input.pickupEtaMin,
+    },
+    include: customerOrderInclude,
+  });
+
+  return attachFinancials(updated);
+};
+
 export type PopularItem = {
   menuItemId: string;
   name: string;
