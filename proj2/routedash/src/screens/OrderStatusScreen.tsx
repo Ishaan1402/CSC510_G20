@@ -1,5 +1,5 @@
 // src/screens/OrderStatusScreen.tsx
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   ScrollView,
   View,
@@ -13,6 +13,7 @@ import {
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { apiPatch } from "../api/client";
 import { useDirections } from "../hooks/useDirections";
+import { PlaceSuggestion, usePlacesAutocomplete } from "../hooks/usePlacesAutocomplete";
 import type { RootStackParamList, OrderStatusValue, OrderSummary } from "../navigation/types";
 
 type OrderStatusScreenProps = NativeStackScreenProps<RootStackParamList, "OrderStatus">;
@@ -41,6 +42,10 @@ export const OrderStatusScreen: React.FC<OrderStatusScreenProps> = ({ route }) =
   const [routeOrigin, setRouteOrigin] = useState(order.routeOrigin);
   const [routeDestination, setRouteDestination] = useState(order.routeDestination);
   const { fetchRoute, result: directionsResult, isLoading: isCalculatingRoute } = useDirections();
+  const originAutocomplete = usePlacesAutocomplete();
+  const destinationAutocomplete = usePlacesAutocomplete();
+  const originDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const destinationDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   if (!order) {
     return (
@@ -53,6 +58,57 @@ export const OrderStatusScreen: React.FC<OrderStatusScreenProps> = ({ route }) =
   const canUpdateRoute = order.status === "PENDING" || order.status === "PREPARING";
   const createdLabel = order.createdAt ? new Date(order.createdAt).toLocaleString() : undefined;
   const statusColor = STATUS_COLORS[order.status] || "#E2E8F0";
+
+  // Cleanup debounce timers on unmount
+  useEffect(
+    () => () => {
+      if (originDebounceRef.current) {
+        clearTimeout(originDebounceRef.current);
+      }
+      if (destinationDebounceRef.current) {
+        clearTimeout(destinationDebounceRef.current);
+      }
+    },
+    [],
+  );
+
+  const handleOriginChange = (value: string) => {
+    setRouteOrigin(value);
+    if (originDebounceRef.current) {
+      clearTimeout(originDebounceRef.current);
+    }
+    originDebounceRef.current = setTimeout(() => {
+      originAutocomplete.fetchSuggestions(value).catch(() => {});
+    }, 280);
+  };
+
+  const handleDestinationChange = (value: string) => {
+    setRouteDestination(value);
+    if (destinationDebounceRef.current) {
+      clearTimeout(destinationDebounceRef.current);
+    }
+    destinationDebounceRef.current = setTimeout(() => {
+      destinationAutocomplete.fetchSuggestions(value).catch(() => {});
+    }, 280);
+  };
+
+  const handleSelectSuggestion = (suggestion: PlaceSuggestion, field: "origin" | "destination") => {
+    if (field === "origin") {
+      if (originDebounceRef.current) {
+        clearTimeout(originDebounceRef.current);
+        originDebounceRef.current = null;
+      }
+      setRouteOrigin(suggestion.description);
+      originAutocomplete.clearSuggestions();
+    } else {
+      if (destinationDebounceRef.current) {
+        clearTimeout(destinationDebounceRef.current);
+        destinationDebounceRef.current = null;
+      }
+      setRouteDestination(suggestion.description);
+      destinationAutocomplete.clearSuggestions();
+    }
+  };
 
   const handleCalculateETA = async () => {
     if (!routeOrigin.trim() || !routeDestination.trim()) {
@@ -132,20 +188,74 @@ export const OrderStatusScreen: React.FC<OrderStatusScreenProps> = ({ route }) =
                 <TextInput
                   style={styles.input}
                   value={routeOrigin}
-                  onChangeText={setRouteOrigin}
+                  onChangeText={handleOriginChange}
+                  onBlur={originAutocomplete.clearSuggestions}
                   placeholder="Enter origin address"
                   editable={!isUpdating}
+                  autoCapitalize="none"
                 />
+                {originAutocomplete.isLoading ? (
+                  <Text style={styles.suggestionNote}>Searching for matching addresses…</Text>
+                ) : null}
+                {originAutocomplete.suggestions.length > 0 ? (
+                  <View style={styles.suggestionList}>
+                    {originAutocomplete.suggestions.map((suggestion, index) => (
+                      <Pressable
+                        key={suggestion.id}
+                        style={[
+                          styles.suggestionRow,
+                          index === originAutocomplete.suggestions.length - 1 &&
+                            styles.suggestionRowLast,
+                        ]}
+                        onPress={() => handleSelectSuggestion(suggestion, "origin")}
+                      >
+                        <Text style={styles.suggestionPrimary}>{suggestion.primaryText}</Text>
+                        {suggestion.secondaryText ? (
+                          <Text style={styles.suggestionSecondary}>
+                            {suggestion.secondaryText}
+                          </Text>
+                        ) : null}
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : null}
               </View>
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Destination</Text>
                 <TextInput
                   style={styles.input}
                   value={routeDestination}
-                  onChangeText={setRouteDestination}
+                  onChangeText={handleDestinationChange}
+                  onBlur={destinationAutocomplete.clearSuggestions}
                   placeholder="Enter destination address"
                   editable={!isUpdating}
+                  autoCapitalize="none"
                 />
+                {destinationAutocomplete.isLoading ? (
+                  <Text style={styles.suggestionNote}>Searching for matching addresses…</Text>
+                ) : null}
+                {destinationAutocomplete.suggestions.length > 0 ? (
+                  <View style={styles.suggestionList}>
+                    {destinationAutocomplete.suggestions.map((suggestion, index) => (
+                      <Pressable
+                        key={suggestion.id}
+                        style={[
+                          styles.suggestionRow,
+                          index === destinationAutocomplete.suggestions.length - 1 &&
+                            styles.suggestionRowLast,
+                        ]}
+                        onPress={() => handleSelectSuggestion(suggestion, "destination")}
+                      >
+                        <Text style={styles.suggestionPrimary}>{suggestion.primaryText}</Text>
+                        {suggestion.secondaryText ? (
+                          <Text style={styles.suggestionSecondary}>
+                            {suggestion.secondaryText}
+                          </Text>
+                        ) : null}
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : null}
               </View>
               <Pressable
                 onPress={handleCalculateETA}
@@ -428,5 +538,39 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: {
     opacity: 0.5,
+  },
+  suggestionNote: {
+    fontSize: 12,
+    color: "#64748B",
+    marginTop: 4,
+    fontStyle: "italic",
+  },
+  suggestionList: {
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 8,
+    backgroundColor: "#FFFFFF",
+    overflow: "hidden",
+    maxHeight: 200,
+  },
+  suggestionRow: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "#E2E8F0",
+  },
+  suggestionRowLast: {
+    borderBottomWidth: 0,
+  },
+  suggestionPrimary: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#0F172A",
+  },
+  suggestionSecondary: {
+    fontSize: 12,
+    color: "#64748B",
+    marginTop: 2,
   },
 });
