@@ -33,6 +33,10 @@ export type RootStackParamList = {
     | {
         fromSavedTrip?: boolean;
         savedTrip?: SavedTrip;
+      }
+    | {
+        initialOrigin?: string;
+        initialDestination?: string;
       };
 
   SavedTrips: undefined;

@@ -74,6 +74,8 @@ export const useRestaurantRecommendations = () => {
           }[];
         }>("/api/restaurants", { requireAuth: false });
 
+        // Filter restaurants that are within reasonable distance of the ENTIRE route
+        // Calculate distances to both the target point and to the nearest point on the route
         const nextItems: Restaurant[] = restaurants
           .map((restaurant) => {
             const location =
@@ -83,7 +85,16 @@ export const useRestaurantRecommendations = () => {
                     longitude: restaurant.longitude,
                   }
                 : target.coordinate;
-            const distance = distanceInMeters(target.coordinate, location);
+            
+            // Find minimum distance to any point on the route
+            let minDistanceToRoute = Infinity;
+            for (const coord of coordinates) {
+              const d = distanceInMeters(coord, location);
+              if (d < minDistanceToRoute) {
+                minDistanceToRoute = d;
+              }
+            }
+            
             return {
               id: restaurant.id,
               name: restaurant.name,
@@ -92,12 +103,14 @@ export const useRestaurantRecommendations = () => {
               travelTimeMinutes: target.minuteMark,
               address: restaurant.address,
               location,
-              distance,
+              distanceToRoute: minDistanceToRoute,
             };
           })
-          .filter((restaurant) => restaurant.distance <= 8000 || restaurant.distance === 0)
+          // Show restaurants within 50km of any point on the route
+          .filter((restaurant) => restaurant.distanceToRoute <= 50000 || restaurant.distanceToRoute === 0)
+          .sort((a, b) => a.distanceToRoute - b.distanceToRoute)
           .slice(0, 10)
-          .map(({ distance: _distance, ...rest }) => rest);
+          .map(({ distanceToRoute: _distance, ...rest }) => rest);
 
         setState({
           isLoading: false,

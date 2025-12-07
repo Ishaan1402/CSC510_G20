@@ -34,7 +34,7 @@ const STATUS_COLORS: Record<OrderStatusValue, string> = {
   CANCELED: "#FEE2E2",
 };
 
-export const OrderStatusScreen: React.FC<OrderStatusScreenProps> = ({ route }) => {
+export const OrderStatusScreen: React.FC<OrderStatusScreenProps> = ({ route, navigation }) => {
   const { order: initialOrder } = route.params;
   const [order, setOrder] = useState<OrderSummary & { createdAt?: string }>(initialOrder);
   const [isEditingRoute, setIsEditingRoute] = useState(false);
@@ -181,6 +181,23 @@ export const OrderStatusScreen: React.FC<OrderStatusScreenProps> = ({ route }) =
               </Pressable>
             )}
           </View>
+          {!isEditingRoute && (
+            <Pressable
+              style={styles.usePlannerButton}
+              onPress={() => {
+                // Navigate to Trip tab with Planner screen and pass the route
+                (navigation as any).navigate("Trip", {
+                  screen: "Planner",
+                  params: {
+                    initialOrigin: order.routeOrigin,
+                    initialDestination: order.routeDestination,
+                  },
+                });
+              }}
+            >
+              <Text style={styles.usePlannerButtonText}>Use This Route in Planner</Text>
+            </Pressable>
+          )}
           {isEditingRoute ? (
             <View style={styles.routeEditContainer}>
               <View style={styles.inputGroup}>
@@ -572,5 +589,20 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#64748B",
     marginTop: 2,
+  },
+  usePlannerButton: {
+    backgroundColor: "#EFF6FF",
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignItems: "center",
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: "#BFDBFE",
+  },
+  usePlannerButtonText: {
+    color: "#2563EB",
+    fontSize: 14,
+    fontWeight: "600",
   },
 });
