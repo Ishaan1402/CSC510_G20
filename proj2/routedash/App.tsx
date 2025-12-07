@@ -8,6 +8,7 @@ import { ActivityIndicator, View } from "react-native";
 import type { TextStyle } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
+
 import { LogoutButton } from "./src/components/LogoutButton";
 import { AuthProvider, useAuth } from "./src/context/AuthContext";
 import { CheckoutPage } from "./src/screens/CheckoutPage";
@@ -19,6 +20,7 @@ import { OrdersScreen } from "./src/screens/OrdersScreen";
 import { PlannerScreen } from "./src/screens/PlannerScreen";
 import { RestaurantsScreen } from "./src/screens/RestaurantsScreen";
 import type { CustomerTabParamList, RootStackParamList } from "./src/navigation/types";
+import { SavedTripsScreen } from "./src/screens/SavedTripsScreen";
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<CustomerTabParamList>();
@@ -52,6 +54,15 @@ const TripStackNavigator = () => (
       name="Planner"
       component={PlannerScreen}
       options={{ headerShown: false, animation: "fade_from_bottom" }}
+    />
+    <TripStack.Screen
+      name="SavedTrips"
+      component={SavedTripsScreen}
+      options={{
+        headerTitle: "Saved Trips",
+        animation: "slide_from_right",
+        ...logoutHeaderOptions,
+      }}
     />
     <TripStack.Screen
       name="Restaurants"

@@ -1,3 +1,4 @@
+// src/screens/PlannerScreen.tsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Linking,
@@ -11,7 +12,7 @@ import {
   useWindowDimensions,
 } from "react-native";
 import Slider from "@react-native-community/slider";
-import { useNavigation } from "@react-navigation/native";
+import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import MapView, { LatLng, Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -28,7 +29,14 @@ import { PlaceSuggestion, usePlacesAutocomplete } from "../hooks/usePlacesAutoco
 import { useRestaurantRecommendations } from "../hooks/useRestaurantRecommendations";
 import type { Restaurant as RecommendedRestaurant } from "../hooks/useRestaurantRecommendations";
 import { useUserProfile } from "../hooks/useUserProfile";
-import { RootStackParamList, RestaurantSummary, TripContext, type VehicleType } from "../navigation/types";
+import {
+  RootStackParamList,
+  RestaurantSummary,
+  TripContext,
+  type VehicleType,
+} from "../navigation/types";
+import type { SavedTrip, SavedTripWaypoint, SavedTripRouteSnapshot  } from "../types/savedTrip";
+import { saveNewTrip } from "../utils/savedTripsStorage";
 
 const DEFAULT_REGION = {
   latitude: 37.7749,
@@ -74,9 +82,18 @@ const computeRegionFromCoordinates = (points: LatLng[]) => {
   return { latitude, longitude, latitudeDelta, longitudeDelta };
 };
 
+// Helper to make a stable key for a coordinate (for kind lookup)
+const coordKey = (lat: number, lng: number) => `${lat.toFixed(6)},${lng.toFixed(6)}`;
+
 export const PlannerScreen = () => {
   const { user } = useAuth();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const route = useRoute<any>();
+  const params = (route?.params ?? {}) as {
+    fromSavedTrip?: boolean;
+    savedTrip?: SavedTrip;
+  };
+
   const {
     error: directionsError,
     fetchRoute,
@@ -118,16 +135,20 @@ export const PlannerScreen = () => {
   const [isRoutePlotted, setIsRoutePlotted] = useState(false);
   const [mealWindow, setMealWindow] = useState<number>(35);
   const [refuelTimeMin, setRefuelTimeMin] = useState<number>(0);
-  const [stopTypeFilter, setStopTypeFilter] = useState<"restaurants" | "stations" | "both">(
-    "both",
-  );
+  const [stopTypeFilter, setStopTypeFilter] = useState<"restaurants" | "stations" | "both">("both");
   const [vehicleType, setVehicleType] = useState<VehicleType>(
     (user?.vehicleType as VehicleType) ?? null,
   );
   const [showVehicleSelector, setShowVehicleSelector] = useState(false);
   const [waypoints, setWaypoints] = useState<Waypoint[]>([]);
   const [selectedGasStation, setSelectedGasStation] = useState<GasStation | null>(null);
-  const [selectedRestaurants, setSelectedRestaurants] = useState<Map<string, RecommendedRestaurant>>(new Map());
+  const [selectedRestaurants, setSelectedRestaurants] = useState<
+    Map<string, RecommendedRestaurant>
+  >(new Map());
+  // For trips loaded from storage: coord → kind
+  const [savedWaypointKinds, setSavedWaypointKinds] = useState<
+    Record<string, SavedTripWaypoint["kind"]>
+  >({});
 
   const window = useWindowDimensions();
   const mapRef = useRef<MapView | null>(null);
@@ -209,7 +230,7 @@ export const PlannerScreen = () => {
 
   const handleSelectGasStation = async (station: GasStation) => {
     setSelectedGasStation(station);
-    
+
     // Fetch pricing details
     if (station.id) {
       await gasStationDetails.fetchDetails(station.id);
@@ -235,27 +256,39 @@ export const PlannerScreen = () => {
 
   const handleRemoveWaypoint = async (index: number) => {
     const removedWaypoint = waypoints[index];
+    if (!removedWaypoint) return;
+
     const updatedWaypoints = waypoints.filter((_, i) => i !== index);
     setWaypoints(updatedWaypoints);
 
-    // Remove from selected restaurants if it was a restaurant
-    if (removedWaypoint) {
-      const updatedRestaurants = new Map(selectedRestaurants);
-      for (const [id, restaurant] of updatedRestaurants.entries()) {
-        if (
-          Math.abs(restaurant.location.latitude - removedWaypoint.location.latitude) < 0.0001 &&
-          Math.abs(restaurant.location.longitude - removedWaypoint.location.longitude) < 0.0001
-        ) {
-          updatedRestaurants.delete(id);
-          break;
-        }
+    // Clean up saved kind for that coordinate
+    const key = coordKey(removedWaypoint.location.latitude, removedWaypoint.location.longitude);
+    setSavedWaypointKinds((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+
+    // Remove from selected restaurants if it was a restaurant (live session)
+    const updatedRestaurants = new Map(selectedRestaurants);
+    for (const [id, restaurant] of updatedRestaurants.entries()) {
+      if (
+        Math.abs(restaurant.location.latitude - removedWaypoint.location.latitude) < 0.0001 &&
+        Math.abs(restaurant.location.longitude - removedWaypoint.location.longitude) < 0.0001
+      ) {
+        updatedRestaurants.delete(id);
+        break;
       }
-      setSelectedRestaurants(updatedRestaurants);
     }
+    setSelectedRestaurants(updatedRestaurants);
 
     // Recalculate route without this waypoint
     if (origin && destination) {
-      const success = await fetchRoute(origin, destination, updatedWaypoints.length > 0 ? updatedWaypoints : undefined);
+      const success = await fetchRoute(
+        origin,
+        destination,
+        updatedWaypoints.length > 0 ? updatedWaypoints : undefined,
+      );
       if (success) {
         setIsRoutePlotted(true);
       }
@@ -267,15 +300,10 @@ export const PlannerScreen = () => {
       return;
     }
 
-    // Build Google Maps URL with waypoints in order
-    // Format: origin -> waypoint1 -> waypoint2 -> ... -> destination
     const originEncoded = encodeURIComponent(origin);
     const destinationEncoded = encodeURIComponent(destination);
-    
-    // Build waypoints string - Google Maps expects pipe-separated lat,lng pairs
-    // Each coordinate pair should be individually encoded while keeping pipe separators literal
+
     const waypointsList: string[] = [];
-    
     waypoints.forEach((waypoint) => {
       const coordPair = `${waypoint.location.latitude},${waypoint.location.longitude}`;
       waypointsList.push(encodeURIComponent(coordPair));
@@ -283,17 +311,14 @@ export const PlannerScreen = () => {
 
     let mapsUrl = `https://www.google.com/maps/dir/?api=1`;
     mapsUrl += `&origin=${originEncoded}`;
-    
+
     if (waypointsList.length > 0) {
-      // Waypoints are pipe-separated and will be visited in order
-      // Pipe separators remain unencoded, only coordinate pairs are encoded
       const waypointsString = waypointsList.join("|");
       mapsUrl += `&waypoints=${waypointsString}`;
     }
-    
+
     mapsUrl += `&destination=${destinationEncoded}`;
 
-    // Open in browser/maps app
     Linking.openURL(mapsUrl).catch((err: Error) => {
       console.warn("Failed to open Google Maps:", err);
     });
@@ -356,6 +381,82 @@ export const PlannerScreen = () => {
     }
   }, [user, showVehicleSelector]);
 
+  // Load from a saved trip if coming from SavedTrips
+  useEffect(() => {
+    const loadFromSavedTrip = async () => {
+      if (!params.fromSavedTrip || !params.savedTrip) return;
+
+      const t = params.savedTrip;
+
+      // Basic fields
+      setOrigin(t.origin);
+      setDestination(t.destination);
+      setMealWindow(t.stopWindowMinutes);
+
+      // stopType → filters
+      if (t.stopType === "food") {
+        setStopTypeFilter("restaurants");
+      } else if (t.stopType === "gas" || t.stopType === "ev") {
+        setStopTypeFilter("stations");
+      } else {
+        setStopTypeFilter("both");
+      }
+
+      if (t.stopType === "gas") {
+        setVehicleType("GAS");
+      } else if (t.stopType === "ev") {
+        setVehicleType("EV");
+      }
+
+      // Build local waypoints from saved trip
+      const loadedWaypoints: Waypoint[] =
+        t.waypoints?.map((wp) => ({
+          location: {
+            latitude: wp.latitude,
+            longitude: wp.longitude,
+          },
+          address: wp.address ?? undefined,
+        })) ?? [];
+
+      setWaypoints(loadedWaypoints);
+
+      // Build map of coord → kind
+      const kindMap: Record<string, SavedTripWaypoint["kind"]> = {};
+      (t.waypoints ?? []).forEach((wp) => {
+        kindMap[coordKey(wp.latitude, wp.longitude)] = wp.kind;
+      });
+      setSavedWaypointKinds(kindMap);
+
+      // Clear transient state
+      setSelectedGasStation(null);
+      setSelectedRestaurants(new Map());
+      reset();
+      resetRecommendations();
+      resetGasStations();
+      resetEVStations();
+
+      // Recalculate route with these waypoints
+      const success = await fetchRoute(
+        t.origin,
+        t.destination,
+        loadedWaypoints.length > 0 ? loadedWaypoints : undefined,
+      );
+      if (success) {
+        setIsRoutePlotted(true);
+      }
+    };
+
+    void loadFromSavedTrip();
+  }, [
+    params.fromSavedTrip,
+    params.savedTrip,
+    reset,
+    resetRecommendations,
+    resetGasStations,
+    resetEVStations,
+    fetchRoute,
+  ]);
+
   useEffect(() => {
     if (totalMinutes && refuelTimeMin === 0) {
       setRefuelTimeMin(Math.max(1, Math.round(totalMinutes * 0.5)));
@@ -377,15 +478,20 @@ export const PlannerScreen = () => {
         result.coordinates.length &&
         result.leg.durationSeconds
       ) {
-        const refuelSliderValue = refuelTimeMin || Math.max(1, Math.round((totalMinutes ?? 60) * 0.5));
+        const refuelSliderValue =
+          refuelTimeMin || Math.max(1, Math.round((totalMinutes ?? 60) * 0.5));
         if (vehicleType === "GAS") {
-          fetchGasStations(result.coordinates, result.leg.durationSeconds, refuelSliderValue).catch(
-            () => {},
-          );
+          fetchGasStations(
+            result.coordinates,
+            result.leg.durationSeconds,
+            refuelSliderValue,
+          ).catch(() => {});
         } else if (vehicleType === "EV") {
-          fetchEVStations(result.coordinates, result.leg.durationSeconds, refuelSliderValue).catch(
-            () => {},
-          );
+          fetchEVStations(
+            result.coordinates,
+            result.leg.durationSeconds,
+            refuelSliderValue,
+          ).catch(() => {});
         }
       } else {
         resetGasStations();
@@ -427,6 +533,7 @@ export const PlannerScreen = () => {
     setWaypoints([]);
     setSelectedGasStation(null);
     setSelectedRestaurants(new Map());
+    setSavedWaypointKinds({});
     reset();
     resetRecommendations();
     resetGasStations();
@@ -473,14 +580,33 @@ export const PlannerScreen = () => {
     }
     if (restaurantRecommendations.length || gasStations.length || evStations.length) {
       const parts: string[] = [];
-      if (restaurantRecommendations.length && (stopTypeFilter === "restaurants" || stopTypeFilter === "both")) {
-        parts.push(`${restaurantRecommendations.length} restaurant${restaurantRecommendations.length !== 1 ? "s" : ""}`);
+      if (
+        restaurantRecommendations.length &&
+        (stopTypeFilter === "restaurants" || stopTypeFilter === "both")
+      ) {
+        parts.push(
+          `${restaurantRecommendations.length} restaurant${
+            restaurantRecommendations.length !== 1 ? "s" : ""
+          }`,
+        );
       }
-      if (vehicleType === "GAS" && gasStations.length && (stopTypeFilter === "stations" || stopTypeFilter === "both")) {
-        parts.push(`${gasStations.length} gas station${gasStations.length !== 1 ? "s" : ""}`);
+      if (
+        vehicleType === "GAS" &&
+        gasStations.length &&
+        (stopTypeFilter === "stations" || stopTypeFilter === "both")
+      ) {
+        parts.push(
+          `${gasStations.length} gas station${gasStations.length !== 1 ? "s" : ""}`,
+        );
       }
-      if (vehicleType === "EV" && evStations.length && (stopTypeFilter === "stations" || stopTypeFilter === "both")) {
-        parts.push(`${evStations.length} EV station${evStations.length !== 1 ? "s" : ""}`);
+      if (
+        vehicleType === "EV" &&
+        evStations.length &&
+        (stopTypeFilter === "stations" || stopTypeFilter === "both")
+      ) {
+        parts.push(
+          `${evStations.length} EV station${evStations.length !== 1 ? "s" : ""}`,
+        );
       }
       if (parts.length > 0) {
         return `Found ${parts.join(" and ")} along your route.`;
@@ -516,14 +642,12 @@ export const PlannerScreen = () => {
 
   const handleSelectRestaurant = async (restaurant: RecommendedRestaurant) => {
     const isSelected = selectedRestaurants.has(restaurant.id);
-    
+
     if (isSelected) {
-      // Remove restaurant from waypoints and selected restaurants
       const updatedRestaurants = new Map(selectedRestaurants);
       updatedRestaurants.delete(restaurant.id);
       setSelectedRestaurants(updatedRestaurants);
 
-      // Find and remove the corresponding waypoint
       const updatedWaypoints = waypoints.filter((wp) => {
         return !(
           Math.abs(wp.location.latitude - restaurant.location.latitude) < 0.0001 &&
@@ -532,7 +656,6 @@ export const PlannerScreen = () => {
       });
       setWaypoints(updatedWaypoints);
 
-      // Recalculate route without this waypoint
       if (origin && destination) {
         const success = await fetchRoute(
           origin,
@@ -544,7 +667,6 @@ export const PlannerScreen = () => {
         }
       }
     } else {
-      // Add restaurant as waypoint
       const newWaypoint: Waypoint = {
         location: restaurant.location,
         address: restaurant.address,
@@ -554,7 +676,6 @@ export const PlannerScreen = () => {
       setWaypoints(updatedWaypoints);
       setSelectedRestaurants(new Map(selectedRestaurants).set(restaurant.id, restaurant));
 
-      // Recalculate route with waypoint
       if (origin && destination) {
         const success = await fetchRoute(origin, destination, updatedWaypoints);
         if (success) {
@@ -580,7 +701,122 @@ export const PlannerScreen = () => {
     navigation.navigate("Menu", { restaurant: summary, trip: tripContext });
   };
 
-  const canPreview = Boolean(origin.trim()) && Boolean(destination.trim()) && !isDirectionsLoading;
+  const handleSavePlannerTrip = async () => {
+  if (!origin.trim() || !destination.trim()) {
+    alert("Please enter both a starting point and destination before saving.");
+    return;
+  }
+
+  let stopType: SavedTrip["stopType"] = "mixed";
+  if (stopTypeFilter === "restaurants") {
+    stopType = "food";
+  } else if (stopTypeFilter === "stations") {
+    if (vehicleType === "GAS") stopType = "gas";
+    else if (vehicleType === "EV") stopType = "ev";
+  }
+
+  const firstSelectedRestaurant = selectedRestaurants.values().next().value as
+    | RecommendedRestaurant
+    | undefined;
+
+  // 👇 NEW: build waypointSnapshots + routeSnapshot consistently
+  let routeSnapshot: SavedTripRouteSnapshot | undefined;
+  let waypointSnapshots: SavedTripWaypoint[] | undefined;
+
+  if (result?.leg && coordinates.length) {
+    waypointSnapshots =
+      waypoints.length > 0
+        ? waypoints.map((wp) => {
+            let kind: SavedTripWaypoint["kind"] = "unknown";
+
+            for (const restaurant of selectedRestaurants.values()) {
+              if (
+                Math.abs(restaurant.location.latitude - wp.location.latitude) < 0.0001 &&
+                Math.abs(restaurant.location.longitude - wp.location.longitude) < 0.0001
+              ) {
+                kind = "restaurant";
+                break;
+              }
+            }
+
+            if (kind === "unknown" && vehicleType === "GAS") {
+              kind = "gas";
+            } else if (kind === "unknown" && vehicleType === "EV") {
+              kind = "ev";
+            }
+
+            return {
+              latitude: wp.location.latitude,
+              longitude: wp.location.longitude,
+              address: wp.address ?? undefined,
+              kind,
+            };
+          })
+        : undefined;
+
+    routeSnapshot = {
+      durationText: result.leg.durationText ?? "",
+      distanceText: result.leg.distanceText ?? "",
+      coordinates: coordinates.map((c) => ({
+        latitude: c.latitude,
+        longitude: c.longitude,
+      })),
+    };
+  }
+
+  const trip: SavedTrip = {
+    id: Date.now().toString(),
+    createdAt: new Date().toISOString(),
+    origin,
+    destination,
+    stopType,
+    stopWindowMinutes: sliderValue,
+    filters: {
+      fastService: false,
+      vegetarian: false,
+      vegan: false,
+      localFavorites: false,
+      priceLevel: null,
+    },
+    restaurant: firstSelectedRestaurant
+      ? (() => {
+          const raw = firstSelectedRestaurant.priceLevel;
+          let priceLevel: number | null | undefined = null;
+
+          if (typeof raw === "number") {
+            priceLevel = raw;
+          } else if (typeof raw === "string") {
+            const parsed = Number(raw);
+            priceLevel = Number.isFinite(parsed) ? parsed : null;
+          } else {
+            priceLevel = null;
+          }
+
+          return {
+            id: firstSelectedRestaurant.id.toString(),
+            name: firstSelectedRestaurant.name,
+            address: firstSelectedRestaurant.address,
+            rating: firstSelectedRestaurant.rating,
+            priceLevel,
+          };
+        })()
+      : undefined,
+    orderSummary: undefined,
+    routeSnapshot,            // ✅ now has coordinates
+    waypoints: waypointSnapshots, // ✅ separate from snapshot
+  };
+
+  try {
+    await saveNewTrip(trip);
+    alert("Trip saved! You can view it offline in Saved Trips.");
+  } catch (err) {
+    console.warn("Failed to save trip", err);
+    alert("We couldn't save this trip just now. Please try again.");
+  }
+};
+
+  const canPreview =
+    Boolean(origin.trim()) && Boolean(destination.trim()) && !isDirectionsLoading;
   const canClear = Boolean(origin.trim() || destination.trim() || coordinates.length);
   const canAdjustMealWindow = Boolean(totalMinutes && sliderMax > sliderMin);
 
@@ -593,7 +829,15 @@ export const PlannerScreen = () => {
             <Text style={styles.headerTitle}>Trip Planner</Text>
             <Text style={styles.headerSubtitle}>{statusLabel}</Text>
           </View>
-          <LogoutButton />
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <Pressable
+              style={styles.merchantLink}
+              onPress={() => navigation.navigate("SavedTrips")}
+            >
+              <Text style={styles.merchantText}>Saved Trips</Text>
+            </Pressable>
+            <LogoutButton />
+          </View>
         </View>
         <View style={styles.userBadge}>
           <View style={styles.avatar}>
@@ -624,6 +868,7 @@ export const PlannerScreen = () => {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
+        {/* FORM CARD */}
         <View style={[styles.formCard, isCompactWidth && styles.cardCompact]}>
           <Text style={styles.sectionTitle}>Route details</Text>
 
@@ -654,7 +899,9 @@ export const PlannerScreen = () => {
                   >
                     <Text style={styles.suggestionPrimary}>{suggestion.primaryText}</Text>
                     {suggestion.secondaryText ? (
-                      <Text style={styles.suggestionSecondary}>{suggestion.secondaryText}</Text>
+                      <Text style={styles.suggestionSecondary}>
+                        {suggestion.secondaryText}
+                      </Text>
                     ) : null}
                   </Pressable>
                 ))}
@@ -689,7 +936,9 @@ export const PlannerScreen = () => {
                   >
                     <Text style={styles.suggestionPrimary}>{suggestion.primaryText}</Text>
                     {suggestion.secondaryText ? (
-                      <Text style={styles.suggestionSecondary}>{suggestion.secondaryText}</Text>
+                      <Text style={styles.suggestionSecondary}>
+                        {suggestion.secondaryText}
+                      </Text>
                     ) : null}
                   </Pressable>
                 ))}
@@ -705,6 +954,18 @@ export const PlannerScreen = () => {
             <Text style={styles.primaryButtonText}>
               {isDirectionsLoading ? "Calculating…" : "Preview route"}
             </Text>
+          </Pressable>
+
+          <Pressable
+            style={[
+              styles.secondaryButton,
+              { marginTop: 12 },
+              !origin.trim() || !destination.trim() ? styles.disabled : null,
+            ]}
+            disabled={!origin.trim() || !destination.trim()}
+            onPress={handleSavePlannerTrip}
+          >
+            <Text style={styles.secondaryButtonText}>Save trip for later</Text>
           </Pressable>
 
           <View style={styles.mealWindowControl}>
@@ -812,6 +1073,7 @@ export const PlannerScreen = () => {
           ) : null}
         </View>
 
+        {/* MAP CARD */}
         <View style={[styles.mapCard, isCompactWidth && styles.cardCompact]}>
           <View style={styles.mapHeader}>
             <Text style={styles.sectionTitle}>Live route</Text>
@@ -844,10 +1106,11 @@ export const PlannerScreen = () => {
                     <Marker
                       key={`waypoint-${index}`}
                       coordinate={waypoint.location}
-                      title={`Stop ${index + 1}: ${waypoint.address || "Gas Station"}`}
+                      title={`Stop ${index + 1}: ${waypoint.address || "Stop"}`}
                       pinColor="#22c55e"
                     />
                   ))}
+
                   {stopTypeFilter !== "restaurants" &&
                     vehicleType === "GAS" &&
                     gasStations.map((station) => {
@@ -856,7 +1119,7 @@ export const PlannerScreen = () => {
                           Math.abs(wp.location.latitude - station.location.latitude) < 0.0001 &&
                           Math.abs(wp.location.longitude - station.location.longitude) < 0.0001,
                       );
-                      if (isWaypoint) return null; // Don't show duplicate marker
+                      if (isWaypoint) return null;
                       return (
                         <Marker
                           key={station.id}
@@ -901,6 +1164,7 @@ export const PlannerScreen = () => {
           </View>
         </View>
 
+        {/* ROUTE OVERVIEW */}
         {isRoutePlotted ? (
           <View style={[styles.statusCard, isCompactWidth && styles.cardCompact]}>
             <Text style={styles.sectionTitle}>Route overview</Text>
@@ -919,22 +1183,57 @@ export const PlannerScreen = () => {
 
               {waypoints.length > 0 &&
                 waypoints.map((waypoint, index) => {
-                  // Determine if this is a restaurant or gas station
+                  const key = coordKey(
+                    waypoint.location.latitude,
+                    waypoint.location.longitude,
+                  );
+                  const savedKind = savedWaypointKinds[key];
+
                   let stopLabel = "Stop";
                   let stopIcon = "⛽";
                   let stopIconStyle = styles.routeStepGas;
-                  let stopName = waypoint.address || "Gas Station";
+                  let stopName = waypoint.address || "Stop";
 
-                  for (const restaurant of selectedRestaurants.values()) {
-                    if (
-                      Math.abs(restaurant.location.latitude - waypoint.location.latitude) < 0.0001 &&
-                      Math.abs(restaurant.location.longitude - waypoint.location.longitude) < 0.0001
-                    ) {
-                      stopLabel = "Restaurant";
-                      stopIcon = "🍽️";
+                  if (savedKind === "restaurant") {
+                    stopLabel = "Restaurant";
+                    stopIcon = "🍽️";
+                    stopIconStyle = styles.routeStepRestaurant;
+                  } else if (savedKind === "gas") {
+                    stopLabel = "Gas station";
+                    stopIcon = "⛽";
+                    stopIconStyle = styles.routeStepGas;
+                  } else if (savedKind === "ev") {
+                    stopLabel = "EV station";
+                    stopIcon = "🔌";
+                    stopIconStyle = styles.routeStepRestaurant;
+                  } else {
+                    // Fallback for live session
+                    for (const restaurant of selectedRestaurants.values()) {
+                      if (
+                        Math.abs(
+                          restaurant.location.latitude - waypoint.location.latitude,
+                        ) < 0.0001 &&
+                        Math.abs(
+                          restaurant.location.longitude - waypoint.location.longitude,
+                        ) < 0.0001
+                      ) {
+                        stopLabel = "Restaurant";
+                        stopIcon = "🍽️";
+                        stopIconStyle = styles.routeStepRestaurant;
+                        stopName = restaurant.name;
+                        break;
+                      }
+                    }
+                    if (stopLabel === "Stop" && vehicleType === "GAS") {
+                      stopLabel = "Gas station";
+                      stopIcon = "⛽";
+                      stopIconStyle = styles.routeStepGas;
+                      stopName = waypoint.address || "Gas Station";
+                    } else if (stopLabel === "Stop" && vehicleType === "EV") {
+                      stopLabel = "EV station";
+                      stopIcon = "🔌";
                       stopIconStyle = styles.routeStepRestaurant;
-                      stopName = restaurant.name;
-                      break;
+                      stopName = waypoint.address || "EV Station";
                     }
                   }
 
@@ -1035,7 +1334,9 @@ export const PlannerScreen = () => {
           </View>
         ) : null}
 
-        {isRoutePlotted && (stopTypeFilter === "restaurants" || stopTypeFilter === "both") ? (
+        {/* RESTAURANTS SECTION */}
+        {isRoutePlotted &&
+        (stopTypeFilter === "restaurants" || stopTypeFilter === "both") ? (
           <View style={[styles.statusCard, isCompactWidth && styles.cardCompact]}>
             <Text style={styles.sectionTitle}>Restaurant picks</Text>
             <Text style={styles.detailSubtitle}>
@@ -1111,6 +1412,7 @@ export const PlannerScreen = () => {
           </View>
         ) : null}
 
+        {/* GAS STATIONS SECTION */}
         {isRoutePlotted &&
         vehicleType === "GAS" &&
         (stopTypeFilter === "stations" || stopTypeFilter === "both") ? (
@@ -1132,10 +1434,13 @@ export const PlannerScreen = () => {
                   const isSelected = waypoints.some(
                     (wp) =>
                       Math.abs(wp.location.latitude - station.location.latitude) < 0.0001 &&
-                      Math.abs(wp.location.longitude - station.location.longitude) < 0.0001,
+                      Math.abs(wp.location.longitude - station.location.longitude) <
+                        0.0001,
                   );
                   const stationPrices =
-                    selectedGasStation?.id === station.id ? gasStationDetails.prices : station.prices;
+                    selectedGasStation?.id === station.id
+                      ? gasStationDetails.prices
+                      : station.prices;
 
                   return (
                     <Pressable
@@ -1162,13 +1467,19 @@ export const PlannerScreen = () => {
                         <View style={styles.priceContainer}>
                           {stationPrices.map((price, idx) => (
                             <Text key={idx} style={styles.priceText}>
-                              {price.type}: {price.currency} {typeof price.price === "number" ? price.price.toFixed(2) : price.price}
+                              {price.type}: {price.currency}{" "}
+                              {typeof price.price === "number"
+                                ? price.price.toFixed(2)
+                                : price.price}
                             </Text>
                           ))}
                         </View>
-                      ) : selectedGasStation?.id === station.id && gasStationDetails.isLoading ? (
+                      ) : selectedGasStation?.id === station.id &&
+                        gasStationDetails.isLoading ? (
                         <Text style={styles.suggestionNote}>Checking for pricing…</Text>
-                      ) : selectedGasStation?.id === station.id && !gasStationDetails.isLoading && !gasStationDetails.prices ? (
+                      ) : selectedGasStation?.id === station.id &&
+                        !gasStationDetails.isLoading &&
+                        !gasStationDetails.prices ? (
                         <Text style={styles.suggestionNote}>
                           Pricing not available for this station.
                         </Text>
@@ -1190,6 +1501,7 @@ export const PlannerScreen = () => {
           </View>
         ) : null}
 
+        {/* EV STATIONS SECTION */}
         {isRoutePlotted &&
         vehicleType === "EV" &&
         (stopTypeFilter === "stations" || stopTypeFilter === "both") ? (
@@ -1234,6 +1546,7 @@ export const PlannerScreen = () => {
           </View>
         ) : null}
 
+        {/* ROUTE STOPS LIST */}
         {waypoints.length > 0 ? (
           <View style={[styles.statusCard, isCompactWidth && styles.cardCompact]}>
             <View style={styles.routeStopsHeader}>
@@ -1243,20 +1556,46 @@ export const PlannerScreen = () => {
               </Pressable>
             </View>
             {waypoints.map((waypoint, index) => {
-              // Check if this waypoint is a restaurant
-              let waypointName = waypoint.address || "Stop";
-              let waypointType = "Gas Station";
-              let waypointIcon = "⛽";
+              const key = coordKey(
+                waypoint.location.latitude,
+                waypoint.location.longitude,
+              );
+              const savedKind = savedWaypointKinds[key];
 
-              for (const restaurant of selectedRestaurants.values()) {
-                if (
-                  Math.abs(restaurant.location.latitude - waypoint.location.latitude) < 0.0001 &&
-                  Math.abs(restaurant.location.longitude - waypoint.location.longitude) < 0.0001
-                ) {
-                  waypointName = restaurant.name;
-                  waypointType = "Restaurant";
-                  waypointIcon = "🍽️";
-                  break;
+              let waypointName = waypoint.address || "Stop";
+              let waypointType = "Stop";
+              let waypointIcon = "📍";
+
+              if (savedKind === "restaurant") {
+                waypointType = "Restaurant";
+                waypointIcon = "🍽️";
+              } else if (savedKind === "gas") {
+                waypointType = "Gas Station";
+                waypointIcon = "⛽";
+              } else if (savedKind === "ev") {
+                waypointType = "EV Station";
+                waypointIcon = "🔌";
+              } else {
+                // Fallback for live session
+                for (const restaurant of selectedRestaurants.values()) {
+                  if (
+                    Math.abs(restaurant.location.latitude - waypoint.location.latitude) <
+                      0.0001 &&
+                    Math.abs(restaurant.location.longitude - waypoint.location.longitude) <
+                      0.0001
+                  ) {
+                    waypointType = "Restaurant";
+                    waypointIcon = "🍽️";
+                    waypointName = restaurant.name;
+                    break;
+                  }
+                }
+                if (waypointType === "Stop" && vehicleType === "GAS") {
+                  waypointType = "Gas Station";
+                  waypointIcon = "⛽";
+                } else if (waypointType === "Stop" && vehicleType === "EV") {
+                  waypointType = "EV Station";
+                  waypointIcon = "🔌";
                 }
               }
 
@@ -1284,6 +1623,7 @@ export const PlannerScreen = () => {
           </View>
         ) : null}
 
+        {/* TRIP SYNOPSIS */}
         {result ? (
           <View style={[styles.statusCard, isCompactWidth && styles.cardCompact]}>
             <Text style={styles.sectionTitle}>Trip synopsis</Text>
@@ -1670,11 +2010,6 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     paddingRight: 8,
   },
-  recommendationRating: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#1D4ED8",
-  },
   recommendationMeta: {
     fontSize: 13,
     color: "#475569",
@@ -1737,10 +2072,12 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#0F172A",
   },
-  waypointLocation: {
-    fontSize: 12,
+  waypointType: {
+    fontSize: 11,
     color: "#64748B",
     marginTop: 2,
+    textTransform: "uppercase",
+    fontWeight: "600",
   },
   removeWaypointButton: {
     paddingVertical: 6,
@@ -1845,12 +2182,5 @@ const styles = StyleSheet.create({
   },
   waypointIconText: {
     fontSize: 16,
-  },
-  waypointType: {
-    fontSize: 11,
-    color: "#64748B",
-    marginTop: 2,
-    textTransform: "uppercase",
-    fontWeight: "600",
   },
 });
