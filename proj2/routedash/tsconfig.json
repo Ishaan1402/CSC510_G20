@@ -7,6 +7,10 @@
     "moduleResolution": "node",
     "jsx": "react-native",
     "baseUrl": ".",
+
+    "types": ["vitest/globals", "vitest"],
+    "typeRoots": ["./node_modules/@types", "./node_modules"],
+
     "paths": {
       "@components/*": ["src/components/*"],
       "@context/*": ["src/context/*"],
@@ -15,6 +19,14 @@
       "@utils/*": ["src/utils/*"]
     }
   },
-  "include": ["**/*.ts", "**/*.tsx"],
+
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "tests/**/*.ts",
+    "tests/**/*.tsx",
+    "vitest.config.ts"
+  ],
+
   "exclude": ["node_modules", "babel.config.js", "metro.config.js"]
 }
