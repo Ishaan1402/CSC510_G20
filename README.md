@@ -22,12 +22,12 @@ RouteDash is a travel-aware meal planning experience that pairs in-flight drive 
 ## Demo
 
 <p align="center">
-  <video src="proj2/docs/demo.mp4" width="640" controls title="RouteDash walkthrough">
-    Your browser does not support embedded videos. Watch the <a href="proj2/docs/demo.mp4">RouteDash demo</a>.
-  </video>
+  <a href="https://drive.google.com/file/d/1ViCX3mGHlqICUd-yVTK0lo9NviR4jtPX/view?usp=sharing">
+    <img src="https://img.shields.io/badge/▶_Watch_Demo-Google_Drive-4285F4?style=for-the-badge&logo=googledrive&logoColor=white" alt="Watch Demo Video"/>
+  </a>
 </p>
 
-The embedded demo (2m 45s) showcases:
+The demo showcases:
 
 - Customer flow: register, set a route, browse nearby restaurants, and place a pickup order.
 - Merchant flow: log in, curate the menu, and step through order preparation stages.
